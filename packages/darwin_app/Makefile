@@ -314,3 +314,4 @@ test_locations:
 	gcc --version
 	@echo --------------------------------------------------
 	xcodebuild -version || pbxbuild -version
+.PHONY: pd_install pd git_version darwin_app_wrapper darwin_app_core darwin_app current
