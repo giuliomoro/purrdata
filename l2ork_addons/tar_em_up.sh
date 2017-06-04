@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -euo pipefail
 # super-simplistic installer for l2ork things by Ivica Ico Bukvic <ico@vt.edu>
 # for info on L2Ork visit http://l2ork.music.vt.edu
 
@@ -9,6 +9,9 @@ cleanup() {
 }
 
 trap 'cleanup $LINENO $?' ERR
+CORES=4
+set -x
+MAKE="make -j${CORES}"
 
 if [ $# -eq 0 ] # should check for no arguments
 then
@@ -238,7 +241,7 @@ then
 	cd pd/src/
 	# make sure that Pd is configured before trying to package it
 	test -f config.h || (aclocal && autoconf && make -C ../../packages pd)
-	make clean
+	$MAKE clean
 	cd ../../
 	tar -jcf ./Pd-l2ork-`date +%Y%m%d`.tar.bz2 pd
 fi
@@ -282,7 +285,7 @@ then
 		cd Gem/
 		export INCREMENTAL="yes"
 	fi
-	cd ../pd/src && aclocal && autoconf
+	cd ../pd/src && aclocal && autoconf || false
 	if [[ $os == "win" ]]; then
 		cd ../../packages/win32_inno
 	elif [[ $os == "osx" ]]; then
@@ -306,7 +309,7 @@ then
 		cp ../../pd/src/g_all_guis.h ../../externals/build/include
 		rm -rf build/
 	fi
-	if [ $rpi -eq 0 ]
+ 	if [ $rpi -eq 0 ] 
 	then
 		echo "installing desktop version..."
 		test -f debian/control.desktop && cp -f debian/control.desktop debian/control
@@ -320,15 +323,16 @@ then
 	if [[ $os == "win" ]]; then
 		echo "Making Windows package..."
 		echo `pwd`
-		make install INCREMENTAL=$INCREMENTAL LIGHT=$LIGHT && make package
+		$MAKE install INCREMENTAL=$INCREMENTAL LIGHT=$LIGHT && make package
 	elif [[ $os == "osx" ]]; then
 		echo "Making OSX package (dmg)..."
 		echo `pwd`
-		make install && make package
+		$MAKE install
+		$MAKE package
 	else
 		# create images folder
 		mkdir -p ../../packages/linux_make/build$inst_dir/lib/pd-l2ork/extra/images
-		make install prefix=$inst_dir
+		$MAKE install prefix=$inst_dir
 	fi
 	echo "copying pd-l2ork-specific externals..."
 	# patch_name
@@ -372,9 +376,9 @@ then
 			cd build/
 			rm -rf DEBIAN/ etc/
 			cd ../
-			make deb prefix=$inst_dir
+			$MAKE deb prefix=$inst_dir
 		else
-			make tarbz2 prefix=$inst_dir
+			$MAKE tarbz2 prefix=$inst_dir
 		fi
 		echo "move full installer..."
 		if [ $deb -gt 0 ]
@@ -386,7 +390,7 @@ then
 			mv -f build/pd*bz2 ../..
 		fi
 		elif [ $deb -gt 0 ]; then
-			make debstage prefix=$inst_dir
+			$MAKE debstage prefix=$inst_dir
 			echo "Debian packaging skipped, build results can be found in packages/linux_make/build/."
 		fi
 		cd ../../
