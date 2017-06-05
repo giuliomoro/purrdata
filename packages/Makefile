@@ -153,14 +153,16 @@ $(pd_src)/src/configure: $(pd_src)/src/configure.ac
 #$(pd_src)/src/makefile: $(pd_src)/src/makefile.in
 #	cd $(pd_src)/src/ && ./configure $(PD_CONFIGURE_FLAGS)
 
-# this line has the "-" to support the current makefile.mingw hack
+# TODO: this line should have the "-" to support the current makefile.mingw hack
 
 pd: $(pd_src)/bin/pd-l2ork git_version
 $(pd_src)/bin/pd-l2ork: $(pd_src)/src/makefile
 	make -C $(pd_src)/src OPT_CFLAGS="" depend
 	make -C $(pd_src)/src $(DEST_PATHS) $(PD_BUILD_FLAGS)
 
-$(pd_src)/src/makefile:
+$(pd_src)/config.h: $(pd_src)/src/configure
+
+$(pd_src)/src/makefile: $(pd_src)/src/configure $(pd_src)/config.h
 	cd $(pd_src)/src && ./configure $(PD_CONFIGURE_FLAGS)
 
 PD_NAME=Pd
