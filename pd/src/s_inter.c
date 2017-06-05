@@ -6,18 +6,18 @@
 that didn't really belong anywhere. */
 
 #include "config.h"
+#include "ringbuffer.h"
+void* poll_thread_loop(void* arg);
 
 #include "m_pd.h"
 #include "s_stuff.h"
 #include "m_imp.h"
 #include "g_canvas.h"   /* for GUI queueing stuff */
-
 #ifdef HAVE_UNISTD_H
 #include <unistd.h>
 #else // if isatty exists outside unistd, please add another #ifdef
 static int isatty(int fd) {return 0;}
 #endif
-
 #ifndef _WIN32
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -91,12 +91,14 @@ static int stderr_isatty;
 #ifdef __linux__
 #include <execinfo.h>
 #endif
+#define RB_SIZE 131072
 
 typedef struct _fdpoll
 {
     int fdp_fd;
     t_fdpollfn fdp_fn;
     void *fdp_ptr;
+    ring_buffer* rb;
 } t_fdpoll;
 
 #define INBUFSIZE 4096
@@ -113,6 +115,7 @@ struct _socketreceiver
 };
 
 extern char *pd_version;
+extern int sys_waitguisetportnumber;
 extern int sys_guisetportnumber;
 
 static int sys_nfdpoll;
@@ -178,43 +181,91 @@ double sys_getrealtime(void)
 
 extern int sys_nosleep;
 
-static int sys_domicrosleep(int microsec, int pollem)
+static void poll_fds(void)
 {
+    const unsigned int maxRecv = RB_SIZE; // an arbitrary limit per call to recv, which will be further narrowed down below on a per-socket basis
+    char* buf;
+    buf = (char*)malloc(maxRecv);
+    int i, ret;
     struct timeval timout;
-    int i, didsomething = 0;
     t_fdpoll *fp;
     timout.tv_sec = 0;
-    timout.tv_usec = (sys_nosleep ? 0 : microsec);
+    timout.tv_usec = 0;
+    fd_set readset, writeset, exceptset;
+    FD_ZERO(&writeset);
+    FD_ZERO(&readset);
+    FD_ZERO(&exceptset);
+    for (fp = sys_fdpoll, i = sys_nfdpoll; i--; fp++)
+	{
+		if(fp->fdp_fd == -1){
+			printf("fdp == -1: %p %l\n", fp, fp - sys_fdpoll);
+			continue;
+		}
+        FD_SET(fp->fdp_fd, &readset);
+	}
+#ifdef _WIN32
+    if (sys_maxfd == 0)
+            Sleep(microsec/1000);
+    else
+#endif
+    select(sys_maxfd+1, &readset, &writeset, &exceptset, &timout);
+    for(i = 0; i < sys_nfdpoll; i++)
+    {
+        if (FD_ISSET(sys_fdpoll[i].fdp_fd, &readset))
+		{
+            int fd = sys_fdpoll[i].fdp_fd;
+            ring_buffer* rb = sys_fdpoll[i].rb;
+            unsigned int size = rb_available_to_write(rb);
+            size = size > maxRecv ? maxRecv : size;
+            //if callback == socketreceiver_read, do this:
+            if ((void*)*sys_fdpoll[i].fdp_fn == (void*)socketreceiver_read)
+			{
+                ret = recv(fd, buf, size, 0);
+				if(ret < 0)
+				{
+					fprintf(stderr, "Error during recv: %s(%d)\n", strerror(-ret), -ret);
+				}
+				else
+				{
+					// store the received data in the ringbuffer
+					ret = rb_write_to_buffer(rb, 1, buf, ret);
+				}
+			}
+            else
+            //otherwise call the actual callback NOW
+                (*sys_fdpoll[i].fdp_fn)(sys_fdpoll[i].fdp_ptr, sys_fdpoll[i].rb, sys_fdpoll[i].fdp_fd);
+
+        }
+    }
+    free(buf);
+}
+
+int sys_domicrosleep(int microsec, int pollem)
+{
+    int i, didsomething = 0;
     if (pollem)
     {
-        fd_set readset, writeset, exceptset;
-        FD_ZERO(&writeset);
-        FD_ZERO(&readset);
-        FD_ZERO(&exceptset);
-        for (fp = sys_fdpoll, i = sys_nfdpoll; i--; fp++)
-            FD_SET(fp->fdp_fd, &readset);
-#ifdef MSW
-        if (sys_maxfd == 0)
-                Sleep(microsec/1000);
-        else
-#endif
-        select(sys_maxfd+1, &readset, &writeset, &exceptset, &timout);
         for (i = 0; i < sys_nfdpoll; i++)
-            if (FD_ISSET(sys_fdpoll[i].fdp_fd, &readset))
         {
+            if(rb_available_to_read(sys_fdpoll[i].rb) > 0)
+            {
 #ifdef THREAD_LOCKING
-            sys_lock();
+                sys_lock();
 #endif
-            (*sys_fdpoll[i].fdp_fn)(sys_fdpoll[i].fdp_ptr, sys_fdpoll[i].fdp_fd);
+                (*sys_fdpoll[i].fdp_fn)(sys_fdpoll[i].fdp_ptr, sys_fdpoll[i].rb, sys_fdpoll[i].fdp_fd);
 #ifdef THREAD_LOCKING
-            sys_unlock();
+                sys_unlock();
 #endif
-            didsomething = 1;
+            }
         }
         return (didsomething);
     }
     else
     {
+        struct timeval timout;
+        t_fdpoll *fp;
+        timout.tv_sec = 0;
+        timout.tv_usec = (sys_nosleep ? 0 : microsec);
 #ifdef MSW
         if (sys_maxfd == 0)
               Sleep(microsec/1000);
@@ -382,6 +433,11 @@ void sys_sockerror(char *s)
 
 void sys_addpollfn(int fd, t_fdpollfn fn, void *ptr)
 {
+	if(fd == -1)
+	{
+		fprintf(stderr, "File descriptor is not valid\n");
+		return;
+	}
     int nfd = sys_nfdpoll;
     int size = nfd * sizeof(t_fdpoll);
     t_fdpoll *fp;
@@ -391,6 +447,7 @@ void sys_addpollfn(int fd, t_fdpollfn fn, void *ptr)
     fp->fdp_fd = fd;
     fp->fdp_fn = fn;
     fp->fdp_ptr = ptr;
+	fp->rb = rb_create(RB_SIZE);
     sys_nfdpoll = nfd + 1;
     if (fd >= sys_maxfd) sys_maxfd = fd + 1;
 }
@@ -471,10 +528,27 @@ static int socketreceiver_doread(t_socketreceiver *x)
     return (0);
 }
 
-static void socketreceiver_getudp(t_socketreceiver *x, int fd)
+int rb_recv(ring_buffer* rb, char* buf, size_t length, void* nothing)
+{
+    int ret;
+    int maxLength = rb_available_to_read(rb);
+    // only request as many bytes as we can store if they are available
+    int actualLength = length < maxLength ? length : maxLength;
+    ret = rb_read_from_buffer(rb, buf, actualLength);
+    if(ret)
+    {
+        printf("Error while reading from buffer: %d\n", ret);
+        return -1;
+    }
+    return actualLength;
+}
+
+static void socketreceiver_getudp(t_socketreceiver *x, ring_buffer* rb, int fd)
 {
     char buf[INBUFSIZE+1];
-    int ret = recv(fd, buf, INBUFSIZE, 0);
+    //int ret = recv(fd, buf, INBUFSIZE, 0);
+    int ret = rb_recv(rb, buf, INBUFSIZE, 0);
+        
     if (ret < 0)
     {
         sys_sockerror("recv");
@@ -510,10 +584,10 @@ static void socketreceiver_getudp(t_socketreceiver *x, int fd)
 
 void sys_exit(void);
 
-void socketreceiver_read(t_socketreceiver *x, int fd)
+void socketreceiver_read(t_socketreceiver *x, ring_buffer* rb, int fd)
 {
     if (x->sr_udp)   /* UDP ("datagram") socket protocol */
-        socketreceiver_getudp(x, fd);
+        socketreceiver_getudp(x, rb, fd);
     else  /* TCP ("streaming") socket protocol */
     {
         int readto =
@@ -529,7 +603,8 @@ void socketreceiver_read(t_socketreceiver *x, int fd)
         }
         else
         {
-            ret = recv(fd, x->sr_inbuf + x->sr_inhead,
+            //ret = recv(fd, x->sr_inbuf + x->sr_inhead,
+            ret = rb_recv(rb, x->sr_inbuf + x->sr_inhead,
                 readto - x->sr_inhead, 0);
             if (ret < 0)
             {
@@ -553,6 +628,8 @@ void socketreceiver_read(t_socketreceiver *x, int fd)
                 else
                 {
                     post("EOF on socket %d\n", fd);
+					//TODO: should it be ?
+					   //if (x->sr_notifier) (*x->sr_notifier)(x->sr_owner, fd);
                     if (x->sr_notifier) (*x->sr_notifier)(x->sr_owner);
                     sys_rmpollfn(fd);
                     sys_closesocket(fd);
@@ -587,7 +664,7 @@ void sys_closesocket(int fd)
 }
 
 /* ---------------------- sending messages to the GUI ------------------ */
-#define GUI_ALLOCCHUNK 8192
+#define GUI_ALLOCCHUNK (8192*4)
 #define GUI_UPDATESLICE 512 /* how much we try to do in one idle period */
 #define GUI_BYTESPERPING 1024 /* how much we send up per ping */
 //#define GUI_BYTESPERPING 0x7fffffff /* as per Miller's suggestion to disable the flow control */
@@ -602,6 +679,7 @@ typedef struct _guiqueue
 
 static t_guiqueue *sys_guiqueuehead;
 static char *sys_guibuf;
+static ring_buffer *sys_guibuf_rb;
 static int sys_guibufhead;
 static int sys_guibuftail;
 static int sys_guibufsize;
@@ -689,6 +767,10 @@ void sys_vvgui(const char *fmt, va_list ap) {
         sys_guibufsize = GUI_ALLOCCHUNK;
         sys_guibufhead = sys_guibuftail = 0;
     }
+	if (!sys_guibuf_rb)
+	{
+		sys_guibuf_rb = rb_create(GUI_ALLOCCHUNK * 8);
+	}
     if (sys_guibufhead > sys_guibufsize - (GUI_ALLOCCHUNK/2))
         sys_trytogetmoreguibuf(sys_guibufsize + GUI_ALLOCCHUNK);
     msglen = vsnprintf(sys_guibuf + sys_guibufhead,
@@ -881,6 +963,57 @@ void gui_start_array(void)
     gui_array_tail = 0;
 }
 
+ssize_t rb_send(ring_buffer* rb, int socket, const void *buffer, size_t length, int flags)
+{
+    size_t maxLength = rb_available_to_write(rb);
+    size_t desiredLength = sizeof(size_t) + length;
+    size_t actualLength = desiredLength <= maxLength ? desiredLength : maxLength;
+    if(actualLength < desiredLength)
+    {
+        // now we are in trouble:
+		// TODO: what should we do? Realloc the ringbuffer I guess
+        perror("rb buffer is full, discarding message");
+        printf("rb buffer %p is full, discarding message. Trying to write %d, available %d\n", rb, desiredLength, maxLength);
+        return -1;
+    }
+    // TODO: what happens if a socket is removed while it is in the queue?
+    rb_write_to_buffer(rb, 3, (char*)&socket, sizeof(socket), (char*)&length, sizeof(length), buffer, length);
+    return actualLength;
+}
+
+void rb_dosend(ring_buffer* rb)
+{
+    int socket;
+    size_t length;
+    char* buf;
+    if(rb_read_from_buffer(rb, (char*)&socket, sizeof(socket)) < 0)
+	{
+		// no message to retrieve
+        return;
+	}
+    if(rb_read_from_buffer(rb, (char*)&length, sizeof(length)) < 0)
+    {
+        // TODO: we should never be here 
+        perror("we should not be here 1");
+        return;
+    }
+    buf = (char*)malloc(length);
+    if(rb_read_from_buffer(rb, buf, length) < 0)
+    {
+        // TODO: we should never be here 
+        perror("we should not be here 2");
+        return;
+    }
+    int nwrote = send(socket, buf, length, 0);
+
+    if (nwrote < 0)
+    {
+        // TODO: these are probably not thread-safe
+        perror("pd-to-gui socket");
+        sys_bail(1);
+    }
+}
+
 void gui_f(t_float f)
 {
     if (gui_array_head && !gui_array_tail)
@@ -964,7 +1097,7 @@ int sys_flushtogui( void)
 {
     int writesize = sys_guibufhead - sys_guibuftail, nwrote = 0;
     if (writesize > 0)
-        nwrote = send(sys_guisock, sys_guibuf + sys_guibuftail, writesize, 0);
+        nwrote = rb_send(sys_guibuf_rb, sys_guisock, sys_guibuf + sys_guibuftail, writesize, 0);
 
 #if 0   
     if (writesize)
@@ -1135,6 +1268,19 @@ static int defaultfontshit[MAXFONTS] = {
         24, 15, 28};
 #define NDEFAULTFONT (sizeof(defaultfontshit)/sizeof(*defaultfontshit))
 
+void rb_dosend(ring_buffer*);
+void poll_fds();
+void* poll_thread_loop(void* arg)
+{
+	printf("Running polling thread\n");
+	while(1)
+	{
+		poll_fds();
+		rb_dosend(sys_guibuf_rb);
+		usleep(10000);
+	}
+}
+
 int sys_startgui(const char *guidir)
 {
     pid_t childpid;
@@ -1142,7 +1288,7 @@ int sys_startgui(const char *guidir)
     char cmdbuf[4*MAXPDSTRING];
     struct sockaddr_in server = {0};
     int len = sizeof(server);
-    int ntry = 0, portno = FIRSTPORTNUM;
+    int ntry = 0, portno = sys_waitguisetportnumber ? sys_waitguisetportnumber : FIRSTPORTNUM;
     int xsock = -1;
     stderr_isatty = isatty(2);
 #ifdef MSW
@@ -1294,6 +1440,7 @@ int sys_startgui(const char *guidir)
             server.sin_port = htons((unsigned short)(portno));
         }
 
+        fprintf(stderr, "Using port %d\n", portno);
         if (sys_verbose) fprintf(stderr, "port %d\n", portno);
 
 
@@ -1608,6 +1755,8 @@ fprintf(stderr, "guidir is %s\n", guidir);
         gui_vmess("gui_set_cwd", "xs", 0, cwd);
         binbuf_free(aapis);
         binbuf_free(mapis);
+		pthread_t fdPollThread;
+		pthread_create(&fdPollThread, NULL, poll_thread_loop, NULL);
     }
     return (0);
 

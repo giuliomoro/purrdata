@@ -46,7 +46,8 @@ int sys_verbose;
 int sys_noloadbang;
 int sys_nogui;
 int sys_hipriority = -1;    /* -1 = don't care; 0 = no; 1 = yes */
-int sys_guisetportnumber;   /* if started from the GUI, this is the port # */
+int sys_waitguisetportnumber = 0;   /* wait for a GUI to connect on this is the port # */
+int sys_guisetportnumber = 0;   /* if started from the GUI, this is the port # */
 int sys_nosleep = 0;    /* skip all "sleep" calls and spin instead */
 int sys_console = 0;    /* default settings for the console is off */
 int sys_k12_mode = 0;   /* by default k12 mode is off */
@@ -344,6 +345,7 @@ int sys_main(int argc, char **argv)
             sys_vgui("pdtk_enable_k12_mode %s\n", path->nl_string);
         }
          /* run scheduler until it quits */
+		printf("Should use callbacks? %d\n", sys_main_callback);
         return (m_mainloop());
     }
 }
@@ -430,6 +432,7 @@ static char *(usagemessage[]) = {
 "-noloadbang      -- suppress all loadbangs\n",
 "-stderr          -- send printout to standard error instead of GUI\n",
 "-nogui           -- suppress starting the GUI\n",
+"-waitport <n>    -- wait for a new GUI over port <n>\n",
 "-guiport <n>     -- connect to pre-existing GUI over port <n>\n",
 "-guicmd \"cmd...\" -- start alternatve GUI program (e.g., remote via ssh)\n",
 "-send \"msg...\"   -- send a message at startup, after patches are loaded\n",
@@ -853,6 +856,12 @@ int sys_argparse(int argc, char **argv)
             argc -= 1;
             argv += 1;
         }
+        else if (!strcmp(*argv, "-waitport") && argc > 1 &&
+            sscanf(argv[1], "%d", &sys_waitguisetportnumber) >= 1)
+        {
+            argc -= 2;
+            argv += 2;
+        }
         else if (!strcmp(*argv, "-guiport") && argc > 1 &&
             sscanf(argv[1], "%d", &sys_guisetportnumber) >= 1)
         {
@@ -979,7 +988,6 @@ int sys_argparse(int argc, char **argv)
         sys_defaultfont = DEFAULTFONT;
     for (; argc > 0; argc--, argv++) 
         sys_openlist = namelist_append_files(sys_openlist, *argv);
-
 
     return (0);
 }
