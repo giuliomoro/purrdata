@@ -25,6 +25,8 @@ then
 	echo "     -F    full tarball installer (complete recompile)"
 	echo "     -k    keep previous build products"
 	echo "     -l    do a light build (only essential externals)"
+	echo "     -C    clean folder and temp files before building"
+	echo "     -e    everything"
 	echo "     -n    skip package creation (-bB, -fF)"
 	echo "     -r    build a Raspberry Pi deb (incremental)"
 	echo "     -R    build a Raspberry Pi deb (complete recompile)"
@@ -53,6 +55,7 @@ then
 fi
 
 deb=0
+clean=0
 core=0
 full=0
 rpi=0
@@ -63,7 +66,7 @@ any=0
 clean=1
 light=0
 
-while getopts ":bBcfFklnRrTtXzZ" Option
+while getopts ":bBcCefFklnRrTtXzZ" Option
 do case $Option in
 		b)		deb=1
 				inst_dir=${inst_dir:-/usr};;
@@ -73,6 +76,11 @@ do case $Option in
 
 		c)		core=1;;
 
+		C)		clean=1;;
+
+		e)		addon=1
+				core=1
+				full=1;;
 		f)		full=1;;
 
 		F)		full=2;;
@@ -107,6 +115,15 @@ do case $Option in
 		*)		echo "Error: unknown option";;
 	esac
 done
+
+if [ $clean -eq 1 ]
+then
+	rm -rf \
+		../pd/src/s_stuff.h \
+		../pd/src/config.h \
+		../pd/src/makefile
+	git -C .. clean -f
+fi
 
 inst_dir=${inst_dir:-/usr/local}
 
@@ -203,9 +220,12 @@ if [ ! -d "../pd/nw/nw" ]; then
 	nwjs_url=${nwjs_url}/$nwjs_filename
 	echo "Fetching the nwjs binary from"
 	echo "$nwjs_url"
-        wget -nv $nwjs_url
+	# delete any existing file with the same name
+	rm -rf $nwjs_filename
+	wget -nv $nwjs_url
 	if [[ $os == "win" || $os == "osx" ]]; then
-		unzip $nwjs_filename
+		# unzip overwriting existing files
+		unzip -o $nwjs_filename
 	else
 		tar -xf $nwjs_filename
 	fi
@@ -214,7 +234,7 @@ if [ ! -d "../pd/nw/nw" ]; then
 	if [ `uname -m` == "armv7l" ]; then
 		nwjs_dirname=`echo $nwjs_dirname | sed 's/armv7l/arm/'`
 	fi
-        mv $nwjs_dirname ../pd/nw/nw
+	mv $nwjs_dirname ../pd/nw/nw
 	# make sure the nw binary is executable on GNU/Linux
 	if [[ $os != "win" && $dmg == 0 ]]; then
 		chmod 755 ../pd/nw/nw/nw
