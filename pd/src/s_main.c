@@ -333,7 +333,7 @@ int sys_main(int argc, char **argv)
     {
         /* open audio and MIDI */
         sys_reopen_midi();
-        sys_reopen_audio();
+        //sys_reopen_audio();
 
         if (sys_console) sys_vgui("pdtk_toggle_console 1\n");
         if (sys_k12_mode)
@@ -373,6 +373,10 @@ static char *(usagemessage[]) = {
 #ifdef USEAPI_ALSA
 "-alsa            -- use ALSA audio API\n",
 "-alsaadd <name>  -- add an ALSA device name to list\n",
+#endif
+
+#ifdef USEAPI_BELA
+"-bela            -- use BELA audio API\n",
 #endif
 
 #ifdef USEAPI_JACK
@@ -652,6 +656,13 @@ int sys_argparse(int argc, char **argv)
         else if (!strcmp(*argv, "-oss"))
         {
             sys_set_audio_api(API_OSS);
+            argc--; argv++;
+        }
+#endif
+#ifdef USEAPI_BELA
+        else if (!strcmp(*argv, "-bela"))
+        {
+            sys_set_audio_api(API_BELA);
             argc--; argv++;
         }
 #endif

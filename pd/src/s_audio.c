@@ -387,6 +387,14 @@ void sys_close_audio(void)
     }
     if (!audio_isopen())
         return;
+#ifdef USEAPI_BELA
+    if (sys_audioapiopened == API_BELA)
+	{
+		printf("bela_close_audio\n");
+        bela_close_audio();
+	}
+    else 
+#endif
 #ifdef USEAPI_PORTAUDIO
     if (sys_audioapiopened == API_PORTAUDIO)
         pa_close_audio();
@@ -435,6 +443,20 @@ void sys_reopen_audio( void)
         sched_set_using_audio(SCHED_AUDIO_NONE);
         return;
     }
+#ifdef USEAPI_BELA
+    if (sys_audioapi == API_BELA)
+    {
+		printf("bela_open_audio\n");
+        int blksize = (audio_blocksize ? audio_blocksize : 64);
+        outcome = bela_open_audio((naudioindev > 0 ? chindev[0] : 0),
+        (naudiooutdev > 0 ? choutdev[0] : 0), rate, sys_soundin,
+            sys_soundout, blksize, sys_advance_samples/blksize, 
+             (naudioindev > 0 ? audioindev[0] : 0),
+              (naudiooutdev > 0 ? audiooutdev[0] : 0),
+               (callback ? sched_audio_callbackfn : 0));
+    }
+    else
+#endif
 #ifdef USEAPI_PORTAUDIO
     if (sys_audioapi == API_PORTAUDIO)
     {
@@ -541,6 +563,14 @@ int sys_send_dacs(void)
         sys_outmax = maxsamp;
     }
 
+#ifdef USEAPI_BELA
+    if (sys_audioapi == API_BELA)
+	{
+		printf("Bela send dacs\n");
+        return (bela_send_dacs());
+	}
+    else 
+#endif
 #ifdef USEAPI_PORTAUDIO
     if (sys_audioapi == API_PORTAUDIO)
         return (pa_send_dacs());
@@ -619,6 +649,16 @@ static void audio_getdevs(char *indevlist, int *nindevs,
 {
     audio_init();
     *cancallback = 0;   /* may be overridden by specific API implementation */
+#ifdef USEAPI_BELA
+    if (sys_audioapi == API_BELA)
+    {
+		printf("bela_getdevs\n");
+        bela_getdevs(indevlist, nindevs, outdevlist, noutdevs, canmulti,
+            maxndev, devdescsize);
+        *cancallback = 1;
+    }
+    else
+#endif
 #ifdef USEAPI_PORTAUDIO
     if (sys_audioapi == API_PORTAUDIO)
     {
@@ -899,12 +939,23 @@ void sys_set_audio_settings_reopen(int naudioindev, int *audioindev, int nchinde
         naudiooutdev, audiooutdev, nchoutdev, choutdev,
         rate, advance, (callback >= 0 ? callback : 0), newblocksize);
     if (!audio_callback_is_open && !callback)
+	{
+		printf("sys_set_audio_settings_reopen\n");
         sys_reopen_audio();
+	}
     else sched_reopenmeplease();
 }
 
 void sys_listdevs(void )
 {
+#ifdef USEAPI_BELA
+    if (sys_audioapi == API_BELA)
+	{
+		printf("bela_listdevs\n");
+        bela_listdevs();
+	}
+    else 
+#endif
 #ifdef USEAPI_PORTAUDIO
     if (sys_audioapi == API_PORTAUDIO)
         sys_listaudiodevs();
@@ -970,7 +1021,10 @@ void glob_audio_setapi(void *dummy, t_floatarg f)
         if (newapi == sys_audioapi)
         {
             if (!audio_isopen())
+			{
+				printf("glob_audio_setapi\n");
                 sys_reopen_audio();
+			}
         }
         else
         {
@@ -980,6 +1034,7 @@ void glob_audio_setapi(void *dummy, t_floatarg f)
             audio_naudioindev = audio_naudiooutdev = 1;
             audio_audioindev[0] = audio_audiooutdev[0] = DEFAULTAUDIODEV;
             audio_audiochindev[0] = audio_audiochoutdev[0] = SYS_DEFAULTCH;
+			printf("glob_audio_setapi2\n");
             sys_reopen_audio();
         }
         glob_audio_properties(0, 0);
@@ -996,7 +1051,10 @@ void sys_set_audio_state(int onoff)
     if (onoff)  /* start */
     {
         if (!audio_isopen())
+		{
+			printf("sys_set_audio_state\n");
             sys_reopen_audio();    
+		}
     }
     else
     {
@@ -1017,6 +1075,10 @@ void sys_get_audio_apis(char *buf)
 #endif
 #ifdef USEAPI_ALSA
     sprintf(buf + strlen(buf), "{ALSA %d} ", API_ALSA); n++;
+#endif
+#ifdef USEAPI_BELA
+    sprintf(buf + strlen(buf), "{BELA %d} ", API_ALSA); n++;
+	printf("bela sys_get_audio_apis\n");
 #endif
 #ifdef USEAPI_PORTAUDIO
 #ifdef MSW
@@ -1052,6 +1114,10 @@ void sys_get_audio_apis2(t_binbuf *buf)
 #endif
 #ifdef USEAPI_ALSA
     binbuf_addv(buf, "si", gensym("ALSA"), API_ALSA); n++;
+#endif
+#ifdef USEAPI_BELA
+	printf("bela sys_get_audio_apis2\n");
+    binbuf_addv(buf, "si", gensym("BELA"), API_BELA); n++;
 #endif
 #ifdef USEAPI_PORTAUDIO
 #ifdef MSW
