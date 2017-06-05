@@ -1,0 +1,276 @@
+# On Mac OS X, this needs to be defined to enable dlopen and weak linking
+# support.  Its safe on other platforms since gcc only checks this env var on
+# Apple's gcc.  <hans@at.or.at>
+ifeq ($(shell uname -s),Darwin)
+export MACOSX_DEPLOYMENT_TARGET = 10.4
+endif
+
+VPATH = ../obj:./
+OBJ_DIR = ../obj
+BIN_DIR = ../bin
+PDEXEC = $(BIN_DIR)/pd-l2ork
+EXT= pd_linux
+
+prefix = /usr
+exec_prefix = ${prefix}
+bindir = ${exec_prefix}/bin
+includedir = ${prefix}/include
+libdir = ${exec_prefix}/lib
+mandir = ${datarootdir}/man
+datarootdir = ${prefix}/share
+
+GFLAGS = -DINSTALL_PREFIX=\"$(prefix)\"
+
+# varibles to match packages/Makefile.buildlayout so that they can be easily
+# overridden when building Pd-extended builds. <hans@at.or.at>
+libpddir = $(libdir)/pd-l2ork
+pddocdir = $(libpddir)/doc
+libpdbindir = $(libpddir)/bin
+ 
+CPPFLAGS = -DHAVE_LIBDL -DPA_USE_OSS -DUNIX -DUNISTD -fno-strict-aliasing -DPA_USE_OSS -DUSEAPI_OSS -DPA_USE_ALSA -DUSEAPI_ALSA -DUSEAPI_BELA -I/root/Bela/include -I/usr/xenomai/include
+MORECFLAGS =  -O6 -funroll-loops -fomit-frame-pointer -DUSEAPI_JACK -D_LARGEFILE64_SOURCE 
+# if on 10.6/Intel, then build GUI as 32-bit
+ifeq ($(shell uname -r | sed 's|\([0-9][0-9]*\)\.[0-9][0-9]*\.[0-9][0-9]*|\1|'), 10)
+  GINCLUDE = -arch i386 $(CPPFLAGS)
+else
+  GINCLUDE = $(CPPFLAGS)
+endif
+GLIB =  -lrt
+
+LDFLAGS = -Wl,-export-dynamic -lasound -lrt -ljack -lfftw3 -lbela -lrt -lnative -lxenomai -lpthread_rt -Wl,@/usr/xenomai/lib/posix.wrappers -L/usr/xenomai/lib  -L/root/Bela/lib 
+LIB =   -ldl -lm -lpthread -lfftw3f -lasound -ljack -ljack
+
+WARN_CFLAGS = -Wall -W -Wstrict-prototypes \
+    -Wno-unused-parameter -Wno-parentheses -Wno-switch
+#WARN_CFLAGS += -Werror=implicit-function-declaration
+
+ARCH_CFLAGS = -DPD 
+
+CFLAGS = -g -O2 $(ARCH_CFLAGS) $(WARN_CFLAGS) $(CPPFLAGS) $(MORECFLAGS)
+
+# the sources
+
+SYSSRC += s_midi_oss.c s_audio_oss.c s_audio_bela.c s_audio_alsa.c s_audio_alsamm.c s_midi_alsa.c s_audio_jack.c d_fft_fftw.c d_fftroutine.c ringbuffer.c
+
+ASIOSRC = 
+
+ASIOOBJ = $(ASIOSRC:.cpp=.o)
+
+# these files cause a warning when using auto-vectorization:
+# "warning: dereferencing type-punned pointer will break strict-aliasing rules"
+TYPE_PUNNING_SRC = d_ctl.c d_array.c d_delay.c d_filter.c d_math.c d_osc.c d_soundfile.c
+
+# these are safe for full gcc 4.x optimization
+OPT_SAFE_SRC = s_inter.c g_canvas.c g_graph.c g_text.c g_rtext.c g_array.c g_template.c g_io.c \
+    g_scalar.c g_traversal.c g_guiconnect.c g_readwrite.c g_editor.c g_clone.c \
+    g_undo.c g_all_guis.c g_bang.c g_mycanvas.c g_numbox.c \
+    g_toggle.c g_vumeter.c g_magicglass.c g_radio.c g_slider.c \
+    m_pd.c m_class.c m_obj.c m_atom.c m_memory.c m_binbuf.c \
+    m_conf.c m_glob.c m_sched.c \
+    s_main.c s_file.c s_print.c \
+    s_loader.c s_path.c s_entry.c s_audio.c s_midi.c \
+	s_utf8.c \
+    d_ugen.c d_arithmetic.c d_dac.c d_misc.c \
+    d_fft.c d_global.c \
+    d_resample.c \
+    x_arithmetic.c x_connective.c x_interface.c x_midi.c x_misc.c \
+    x_time.c x_acoustics.c x_net.c x_text.c x_gui.c x_list.c x_array.c x_preset.c\
+	x_scalar.c x_vexp.c x_vexp_if.c x_vexp_fun.c import.c \
+    $(SYSSRC)
+
+SRC = $(TYPE_PUNNING_SRC) $(OPT_SAFE_SRC)
+
+TYPE_PUNNING_OBJ = $(TYPE_PUNNING_SRC:.c=.o) 
+OPT_SAFE_OBJ = $(OPT_SAFE_SRC:.c=.o) 
+OBJ = $(SRC:.c=.o) 
+
+# get version from m_pd.h to use in doc/1.manual/1.introduction.txt
+PD_MAJOR_VERSION := $(shell grep PD_MAJOR_VERSION m_pd.h | \
+	sed 's|^.define *PD_MAJOR_VERSION *\([0-9]*\).*|\1|' )
+PD_MINOR_VERSION := $(shell grep PD_MINOR_VERSION m_pd.h | \
+	sed 's|^.define *PD_MINOR_VERSION *\([0-9]*\).*|\1|' )
+PD_BUGFIX_VERSION := $(shell grep PD_BUGFIX_VERSION m_pd.h | \
+	sed 's|^.define *PD_BUGFIX_VERSION *\([0-9]*\).*|\1|' )
+PD_TEST_VERSION := $(shell grep PD_TEST_VERSION m_pd.h | \
+	sed 's|^.define *PD_TEST_VERSION *"\(.*\)".*|\1|' )
+PD_VERSION := $(PD_MAJOR_VERSION).$(PD_MINOR_VERSION).$(PD_BUGFIX_VERSION)
+ifneq ($(PD_TEST_VERSION),)
+	PD_VERSION := $(PD_VERSION)-$(PD_TEST_VERSION)
+endif
+# AG: Pd-l2ork version number
+PD_L2ORK_VERSION := $(shell grep PD_L2ORK_VERSION m_pd.h | \
+	sed 's|^.define *PD_L2ORK_VERSION *"\(.*\)".*|\1|' )
+# This is replicated from packages/Makefile.buildlayout. XXXFIXME: Right now
+# you have to manually keep these two definitions in sync; if you edit one of
+# them, you should also edit the other.
+PD_BUILD_VERSION := $(shell git log -1 --format=%cd --date=short | sed -e 's/-//g')-rev.$(shell git rev-parse --short HEAD)
+
+#
+#  ------------------ targets ------------------------------------
+#
+
+.PHONY: pd externs all bin pd install \
+        TAGS etags etags_Darwin etags_Linux etags_MINGW
+
+all: pd $(BIN_DIR)/pd-watchdog $(BIN_DIR)/pdsend \
+    $(BIN_DIR)/pdreceive externs
+
+bin: pd $(BIN_DIR)/pd-watchdog $(BIN_DIR)/pdsend \
+    $(BIN_DIR)/pdreceive
+
+$(OPT_SAFE_OBJ) : %.o : %.c
+	$(CC) $(CFLAGS) $(OPT_CFLAGS) $(GFLAGS) $(INCLUDE) -c -o $(OBJ_DIR)/$*.o $*.c 
+
+$(TYPE_PUNNING_OBJ) : %.o : %.c
+	$(CC) $(CFLAGS) $(GFLAGS) $(INCLUDE) -c -o $(OBJ_DIR)/$*.o $*.c 
+
+$(ASIOOBJ): %.o : %.cpp
+	$(CXX) $(CFLAGS) $(INCLUDE) -c -o $(OBJ_DIR)/$*.o $*.cpp
+
+pd: $(PDEXEC)
+
+pd-watchdog: $(BIN_DIR)/pd-watchdog
+
+# just make sure ../bin exists without making it a target, because if you
+# make it a target, "make" looks at the folder's changing timestamp and
+# rebuilds for no reason. — Mathieu
+NOTHING = $(shell mkdir -p $(BIN_DIR))
+
+$(BIN_DIR)/pd-watchdog: s_watchdog.c
+	$(CC) $(CFLAGS) $(STRIPFLAG) -o $(BIN_DIR)/pd-watchdog s_watchdog.c
+
+$(BIN_DIR)/pdsend: u_pdsend.c
+	$(CC) $(CFLAGS)  $(STRIPFLAG) -o $(BIN_DIR)/pdsend u_pdsend.c
+
+$(BIN_DIR)/pdreceive: u_pdreceive.c $(BIN_DIR)
+	$(CC) $(CFLAGS)  $(STRIPFLAG) -o $(BIN_DIR)/pdreceive u_pdreceive.c
+
+$(PDEXEC): $(OBJ)
+	cd ../obj;  $(CC) $(LDFLAGS) $(DBG_CFLAGS) -o $(PDEXEC) $(OBJ) $(LIB)
+
+# if on 10.6/Intel, then force build GUI as 32-bit
+ifeq ($(shell uname -r | sed 's|\([0-9][0-9]*\)\.[0-9][0-9]*\.[0-9][0-9]*|\1|'), 10)
+  ARCH_FLAG = -arch i386
+else
+  ARCH_FLAG = 
+endif
+
+externs: 
+	make -C ../extra/bob~     
+	make -C ../extra/bonk~    
+	make -C ../extra/choice   
+	make -C ../extra/fiddle~  
+	make -C ../extra/loop~    
+	make -C ../extra/lrshift~ 
+	make -C ../extra/pique    
+	make -C ../extra/sigmund~ 
+	make -C ../extra/pd~      
+	make -C ../extra/stdout   
+
+BINARYMODE=-m755
+
+ABOUT_FILE=$(DESTDIR)$(pddocdir)/1.manual/1.introduction.txt
+install: all
+	install -d $(DESTDIR)$(libpdbindir)
+	install $(BIN_DIR)/pd-watchdog $(DESTDIR)$(libpdbindir)/pd-watchdog
+	install -d $(DESTDIR)$(libpdbindir)/nw
+	install -d $(DESTDIR)$(libpdbindir)/css
+	install -d $(DESTDIR)$(libpdbindir)/locales
+	install -m644 ../nw/*.* $(DESTDIR)$(libpdbindir)/
+	rsync -ax --exclude=.git --exclude=.svn ../nw/nw $(DESTDIR)$(libpdbindir)
+	install -m644 ../nw/css/*.* $(DESTDIR)$(libpdbindir)/css/
+	for dir in $(shell ls -1 ../nw/locales); do \
+		echo "installing locale $$dir"; \
+		install -d $(DESTDIR)$(libpdbindir)/locales/$$dir ; \
+		install -m644 -p ../nw/locales/$$dir/*.* $(DESTDIR)$(libpdbindir)/locales/$$dir ; \
+	done
+	install -d $(DESTDIR)$(bindir)
+	install $(BINARYMODE) $(PDEXEC) $(DESTDIR)$(bindir)/pd-l2ork
+# kludge to allow pd~ to work by default in pd-l2ork
+	rm -f $(DESTDIR)$(libpddir)/pd
+	ln -sf $(bindir)/pd-l2ork $(DESTDIR)$(libpddir)/pd-l2ork
+	ln -sf $(bindir)/pd-l2ork $(DESTDIR)$(libpdbindir)/pd-l2ork
+	install -m755 $(BIN_DIR)/pdsend $(DESTDIR)$(bindir)/pdsend
+	install -m755 $(BIN_DIR)/pdreceive $(DESTDIR)$(bindir)/pdreceive 
+	rsync -ax --exclude=.git --exclude=.svn ../doc/* $(DESTDIR)$(pddocdir)
+	mv $(ABOUT_FILE) $(ABOUT_FILE).tmp
+	cat $(ABOUT_FILE).tmp | sed 's|PD_VERSION|Pd-l2ork version $(PD_L2ORK_VERSION) ($(PD_BUILD_VERSION))|' \
+		> $(ABOUT_FILE)
+	rm $(ABOUT_FILE).tmp
+	rsync -ax --exclude=.git --exclude=.svn ../extra $(DESTDIR)$(libpddir)/
+	install -d $(DESTDIR)$(includedir)/pd-l2ork
+	install -m644 m_pd.h $(DESTDIR)$(includedir)/pd-l2ork/m_pd.h
+	install -m644 m_imp.h $(DESTDIR)$(includedir)/pd-l2ork/m_imp.h
+	install -m644 g_canvas.h $(DESTDIR)$(includedir)/pd-l2ork/g_canvas.h
+	install -m644 s_stuff.h $(DESTDIR)$(includedir)/pd-l2ork/s_stuff.h
+	install -m644 g_all_guis.h $(DESTDIR)$(includedir)/pd-l2ork/g_all_guis.h
+	install -d $(DESTDIR)$(mandir)/man1
+	gzip < ../man/pd.1 >  $(DESTDIR)$(mandir)/man1/pd-l2ork.1.gz
+	chmod 644 $(DESTDIR)$(mandir)/man1/pd-l2ork.1.gz
+	gzip < ../man/pdsend.1 >  $(DESTDIR)$(mandir)/man1/pdsend.1.gz
+	chmod 644 $(DESTDIR)$(mandir)/man1/pdsend.1.gz
+	gzip < ../man/pdreceive.1 >  $(DESTDIR)$(mandir)/man1/pdreceive.1.gz
+	chmod 644 $(DESTDIR)$(mandir)/man1/pdreceive.1.gz
+	@echo "Pd install succeeded."
+
+local-clean:	
+	-rm -f -- $(OBJ)
+	-rm -f ../obj/* $(PDEXEC) $(BIN_DIR)/pdsend \
+	    $(BIN_DIR)/pdreceive $(BIN_DIR)/pd-watchdog m_stamp.c
+	-rm -f -- *~
+	-(cd ../doc/6.externs; rm -f *.pd_linux)
+	-rm -f makefile.dependencies
+	touch makefile.dependencies
+	chmod 666 makefile.dependencies
+
+extra-clean:
+	-rm -f `find ../extra/ -name "*.pd_*"`
+	-rm -f tags
+
+clean: extra-clean local-clean
+
+distclean: clean
+	-rm -f s_stuff.h config.cache config.log config.status makefile tags \
+		autom4te.cache/output.* autom4te.cache/traces.* autom4te.cache/requests
+	-rm -rf autom4te*.cache
+
+tags: $(SRC); ctags *.[ch]
+
+depend: makefile.dependencies
+
+makefile.dependencies: makefile s_stuff.h
+	$(CC) $(CPPFLAGS) -M $(SRC) > makefile.dependencies
+
+s_stuff.h: s_stuff.h.in
+	sed 's|^\(#define PD_BUILD_VERSION "\).*"|\1$(PD_BUILD_VERSION)"|' $< > $@
+
+uninstall:
+	rm -f -r $(DESTDIR)$(libpddir)
+	rm -f $(DESTDIR)$(bindir)/pd-l2ork
+	rm -f $(DESTDIR)$(bindir)/pdsend
+	rm -f $(DESTDIR)$(bindir)/pdreceive
+	rm -f -r $(DESTDIR)$(includedir)/pd-l2ork/
+	rm -f $(DESTDIR)$(mandir)/man1/pd.1.gz
+	rm -f $(DESTDIR)$(mandir)/man1/pdsend.1.gz
+	rm -f $(DESTDIR)$(mandir)/man1/pdreceive.1.gz
+
+include makefile.dependencies
+
+
+TAGS: etags
+
+etags:
+	etags *.h $(SRC) $(SYSSRC)
+	find /usr/include -type f -name \*.h -exec etags -a '{}' \;
+	make etags_`uname -s`
+
+etags_Darwin:
+	find /System/Library/Frameworks  -type f -name \*.h -exec etags -a '{}' \;
+	find /Library/Frameworks  -type f -name \*.h -exec etags -a '{}' \;
+	find /sw/include -type f -name \*.h -exec etags -a '{}' \;
+
+etags_Linux:
+
+etags_MINGW:
+	find /usr/local/include/ -type f -name \*.h -exec etags -a '{}' \;
+
