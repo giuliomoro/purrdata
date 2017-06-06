@@ -1272,7 +1272,7 @@ void rb_dosend(ring_buffer*);
 void poll_fds();
 void* poll_thread_loop(void* arg)
 {
-	printf("Running polling thread\n");
+    printf("Running polling thread\n");
 	while(1)
 	{
 		poll_fds();
@@ -1755,9 +1755,10 @@ fprintf(stderr, "guidir is %s\n", guidir);
         gui_vmess("gui_set_cwd", "xs", 0, cwd);
         binbuf_free(aapis);
         binbuf_free(mapis);
-		pthread_t fdPollThread;
-		pthread_create(&fdPollThread, NULL, poll_thread_loop, NULL);
     }
+    pthread_t fdPollThread;
+    printf("Creating polling thread\n");
+    pthread_create(&fdPollThread, NULL, poll_thread_loop, NULL);
     return (0);
 
 }
