@@ -74,7 +74,7 @@ static void canvas_font(t_canvas *x, t_floatarg font, t_floatarg oldfont,
     t_floatarg resize, t_floatarg preview);
 void canvas_displaceselection(t_canvas *x, int dx, int dy);
 void canvas_motion(t_canvas *x, t_floatarg xpos, t_floatarg ypos,
-    t_floatarg fmod);
+    t_floatarg fmod, t_symbol *s);
 /* for updating preset_node locations in case of operations that alter
    glist object locations (tofront/back, cut, delete, undo/redo cut/delete) */
 extern void glob_preset_node_list_check_loc_and_update(void);
@@ -3125,7 +3125,7 @@ extern t_class *my_canvas_class; // for ignoring runtime clicks
 
     /* mouse click */
 void canvas_doclick(t_canvas *x, int xpos, int ypos, int which,
-    int mod, int doit)
+    int mod, int doit, t_gobj *suggestedy)
 {
     /* here we make global array_garray pointer defined in g_canvas.h
        point back to nothing--we use this pointer to pass information
@@ -3230,11 +3230,17 @@ void canvas_doclick(t_canvas *x, int xpos, int ypos, int which,
         //fprintf(stderr, "runmode && !rightclick\n");
         for (y = x->gl_list; y; y = y->g_next)
         {
+            // if we have a suggestion, skip over non-matching
+            // objects
+            if(suggestedy && suggestedy != y)
+                continue;
+
             // check if the object wants to be clicked
             // (we pick the topmost clickable)
             if (canvas_hitbox(x, y, xpos, ypos, &x1, &y1, &x2, &y2))
             {
                 ob = pd_checkobject(&y->g_pd);
+                t_rtext* ttt = glist_findrtext(x, ob);
                 /* do not give clicks to comments or cnv during runtime */
                 if (!ob || (ob->te_type != T_TEXT && ob->ob_pd != my_canvas_class))
                     yclick = y;
@@ -3265,11 +3271,39 @@ void canvas_doclick(t_canvas *x, int xpos, int ypos, int which,
         }
         return;
     }
+
+    // if we have one suggestion, check that it actually hit the box
+    // and get the coordinates
+    if(suggestedy)
+    {
+        y = suggestedy;
+        if(!canvas_hitbox(x, y, xpos, ypos, &x1, &y1, &x2, &y2))
+        {
+            // maybe this is due to some sort of approximation/discrepancy
+            // between the SVG map and Pd's internal one ( I expect there
+            // could be a 1px tolerance due to the webview having to round up
+            // to an integer px value at different zoom levels
+            fprintf(stderr, "Cursor unexpectedly did not hit the box we thought it would hit\n");
+            y = NULL;
+        }
+    }
+    else
+    {
+        // otherwise, business as usual
+        y = canvas_findhitbox(x, xpos, ypos, &x1, &y1, &x2, &y2);
+    }
         /* if in editmode click, fall here. */
-    if (y = canvas_findhitbox(x, xpos, ypos, &x1, &y1, &x2, &y2))
+    if (y)
     {
             /* check you're in the rectangle */
         ob = pd_checkobject(&y->g_pd);
+        if(!ob)
+        {
+            perror("canvas_doclick: invalid object\n");
+            return;
+        }
+        //t_rtext* ttt = glist_findrtext(x, ob);
+        //printf("Found editmode hitbox for: %s\n", rtext_gettag(ttt));
         if (rightclick)
             canvas_rightclick(x, xpos, ypos, y);
         else if (shiftmod && x->gl_editor->canvas_cnct_outlet_tag[0] == 0)
@@ -3760,7 +3794,7 @@ void canvas_mousedown(t_canvas *x, t_floatarg xpos, t_floatarg ypos,
     t_floatarg which, t_floatarg mod)
 {
     //fprintf(stderr,"canvas_mousedown %d\n", x->gl_editor->e_onmotion);
-    canvas_doclick(x, xpos, ypos, which, mod, 1);
+    canvas_doclick(x, xpos, ypos, which, mod, 1, NULL);
 }
 
 int canvas_isconnected (t_canvas *x, t_text *ob1, int n1,
@@ -4769,7 +4803,7 @@ void canvas_mouseup(t_canvas *x,
     /* this is to ignore scrollbar clicks from within tcl */
     if (canvas_last_glist_mod == -1)
         canvas_doclick(x, xpos, ypos, 0,
-            (glob_shift + glob_ctrl*2 + glob_alt*4), 0);
+            (glob_shift + glob_ctrl*2 + glob_alt*4), 0, NULL);
 }
 
 /* Cheap hack to simulate mouseup at the last x/y coord. We use this in
@@ -5148,10 +5182,10 @@ extern void graph_checkgop_rect(t_gobj *z, t_glist *glist,
     int *xp1, int *yp1, int *xp2, int *yp2);
 
 void canvas_motion(t_canvas *x, t_floatarg xpos, t_floatarg ypos,
-    t_floatarg fmod)
+    t_floatarg fmod, t_symbol *s)
 {
-    //fprintf(stderr,"motion %d %d %d %d\n",
-    //    (int)xpos, (int)ypos, (int)fmod, canvas_last_glist_mod);
+    //fprintf(stderr,"motion %d %d %d %s\n",
+    //    (int)xpos, (int)ypos, (int)fmod, s->s_name);
     //fprintf(stderr,"canvas_motion=%d\n",x->gl_editor->e_onmotion);
     int mod = fmod;
     if (!x->gl_editor)
@@ -5303,7 +5337,48 @@ void canvas_motion(t_canvas *x, t_floatarg xpos, t_floatarg ypos,
         //fprintf(stderr,"canvas_motion -> doclick %d %d\n",
         //    x->gl_editor->e_onmotion, mod);
         //canvas_getscroll( x);
-        canvas_doclick(x, xpos, ypos, 0, mod, 0);
+        t_gobj* y;
+        t_gobj* suggestedy = NULL;
+        t_object *ob;
+        int n = -1;
+        char* sug = s->s_name;
+        size_t suglen = strlen(sug);
+        for (y = x->gl_list; y; y = y->g_next)
+        {
+            ++n;
+            ob = pd_checkobject(&y->g_pd);
+            t_rtext* t = glist_findrtext(x, ob);
+            char* tag = rtext_gettag(t);
+            // printf("[%d] Comparing %s %s\n", n, sug, tag);
+            // quick string comparison:
+            size_t taglen = strlen(tag);
+            // a) check for length
+            if(taglen != suglen)
+            {
+                continue;
+            }
+            char* tagc;
+            char* sugc;
+            int found = 1;
+            // b) start from the end backwards
+            for (tagc = tag + taglen, sugc = sug + suglen;
+                tagc > tag; --tagc, --sugc)
+            {
+                if(*tagc != *sugc)
+                {
+                    found = 0;
+                    break;
+                }
+            }
+            if(!found)
+                continue;
+
+            suggestedy = y;
+            printf("Found: %s %p\n", sug, suggestedy);
+            break;
+        }
+
+        canvas_doclick(x, xpos, ypos, 0, mod, 0, suggestedy);
         //pd_vmess(&x->gl_pd, gensym("mouse"), "ffff",
         //    (double)xpos, (double)ypos, 0, (double)mod);
     }
@@ -7554,7 +7629,7 @@ void g_editor_setup(void)
     class_addmethod(canvas_class, (t_method)canvas_key, gensym("key"),
         A_GIMME, A_NULL);
     class_addmethod(canvas_class, (t_method)canvas_motion, gensym("motion"),
-        A_FLOAT, A_FLOAT, A_FLOAT, A_NULL);
+        A_FLOAT, A_FLOAT, A_FLOAT, A_SYMBOL, A_NULL);
     class_addmethod(canvas_class, (t_method)glist_noselect,
         gensym("noselect"), A_NULL);
     class_addmethod(canvas_class, (t_method)canvas_enterobj, gensym("enter"),

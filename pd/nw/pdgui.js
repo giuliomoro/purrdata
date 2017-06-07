@@ -1821,7 +1821,10 @@ function gui_gobj_new(cid, tag, type, xpos, ypos, is_toplevel) {
         g = create_item(cid, "g", {
             id: tag + "gobj",
             transform: transform_string,
-            class: type + (is_toplevel !== 0 ? "" : " gop")
+            class: type + (is_toplevel !== 0 ? "" : " gop"),
+            onmouseover: "pdgui.mouseovercallback(this)",
+            onmouseout: "pdgui.mouseoutcallback(this)",
+            "data-pdtag": "."+tag, //this may be replaced for GUI objects if the child has a more detailed one
         });
         add_gobj_to_svg(svg, g);
         // hm... why returning g and not the return value of appendChild?
@@ -1850,6 +1853,30 @@ function gui_text_draw_border(cid, tag, bgcolor, isbroken, x1, y1, x2, y2) {
     }
 }
 
+var voidId = ".";
+var moId = voidId;
+function isCursorOverAnObject()
+{
+    return moId !== voidId;
+}
+
+function getMoId()
+{
+	return moId;
+}
+function mouseovercallback(obj)
+{
+    moId = obj.dataset.pdtag;
+}
+function mouseoutcallback(obj)
+{
+	moId = voidId;
+}
+exports.getMoId = getMoId;
+exports.isCursorOverAnObject = isCursorOverAnObject;
+
+exports.mouseovercallback = mouseovercallback;
+exports.mouseoutcallback = mouseoutcallback;
 function gui_gobj_draw_io(cid, parenttag, tag, x1, y1, x2, y2, basex, basey,
     type, i, is_signal, is_iemgui) {
     var xlet_class, xlet_id, rect, g;
@@ -1857,6 +1884,7 @@ function gui_gobj_draw_io(cid, parenttag, tag, x1, y1, x2, y2, basex, basey,
         return;
     }
     g = get_gobj(cid, parenttag);
+    var pdtag = tag;
     if (is_iemgui) {
         xlet_class = "xlet_iemgui";
         // We have an inconsistency here.  We're setting the tag using
@@ -1865,6 +1893,8 @@ function gui_gobj_draw_io(cid, parenttag, tag, x1, y1, x2, y2, basex, basey,
         // in general try to simplify tag creation on the c side as much
         // as possible.
         xlet_id = tag;
+        var re = /([a-z][0-9]*)[io][0-9]*/;
+        pdtag = tag.replace(re, "$1");
     } else if (is_signal) {
         xlet_class = "xlet_signal";
         xlet_id = tag + type + i;
@@ -1882,7 +1912,14 @@ function gui_gobj_draw_io(cid, parenttag, tag, x1, y1, x2, y2, basex, basey,
         //"shape-rendering": "crispEdges"
     });
     g.appendChild(rect);
+
+    // native GUI object receive a different tag when creating their <g>obj, but 
+    // we are interested in the one that comes here, so we replace it here
+    // NOTE: GUI objects without inlets/outlets will not get their 
+    // ID assigned
+    g.dataset.pdtag = pdtag;
 }
+exports.get_gobj = get_gobj;
 
 function gui_gobj_redraw_io(cid, parenttag, tag, x, y, type, i, basex, basey) {
     var xlet = get_item(cid, tag + type + i);
@@ -3487,6 +3524,8 @@ var pd_cache = (function() {
 }());
 
 exports.pd_cache = pd_cache;
+exports.gui_gobj_highlight_io = gui_gobj_highlight_io;
+exports.gui_gobj_configure_io = gui_gobj_configure_io;
 
 function gui_drawimage_new(obj_tag, file_path, canvasdir, flags) {
     var drawsprite = 1,

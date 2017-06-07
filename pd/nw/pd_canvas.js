@@ -152,6 +152,7 @@ function canvas_find_reset() {
 
 var canvas_events = (function() {
     var name,
+        is_mouse_down = false,
         state,
         scalar_draggables = {}, // elements of a scalar which have the "drag" event enabled
         draggable_elem,         // last scalar we dragged
@@ -229,16 +230,22 @@ var canvas_events = (function() {
             mousemove: function(evt) {
                 //pdgui.post("x: " + evt.pageX + " y: " + evt.pageY +
                 //    " modifier: " + (evt.shiftKey + (pdgui.cmd_or_ctrl_key(evt) << 1)));
-                pdgui.pdsend(name, "motion",
-                    (evt.pageX + svg_view.x),
-                    (evt.pageY + svg_view.y),
-                    (evt.shiftKey + (pdgui.cmd_or_ctrl_key(evt) << 1))
-                );
+				// only send a `motion` message` if the mouse or if we are on top of an object
+                if(is_mouse_down || pdgui.isCursorOverAnObject())
+                {
+                    pdgui.pdsend(name, "motion",
+                        (evt.pageX + svg_view.x),
+                        (evt.pageY + svg_view.y),
+                        (evt.shiftKey + (pdgui.cmd_or_ctrl_key(evt) << 1)),
+                        pdgui.getMoId()
+                    );
+                }
                 evt.stopPropagation();
                 evt.preventDefault();
                 return false;
             },
             mousedown: function(evt) {
+                is_mouse_down = true;
                 var target_id;
                 if (target_is_scrollbar(evt)) {
                     return;
@@ -291,6 +298,7 @@ var canvas_events = (function() {
                 //evt.preventDefault();
             },
             mouseup: function(evt) {
+                is_mouse_down = false;
                 //pdgui.post("mouseup: x: " +
                 //    evt.pageX + " y: " + evt.pageY +
                 //    " button: " + (evt.button + 1));
