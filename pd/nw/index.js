@@ -99,7 +99,7 @@ function nw_window_zoom(delta) {
 
 function connect() {
     var gui_path, file_path;
-    if (have_args() && gui.App.argv.length > 1) {
+    if (have_args() && gui.App.argv.length > 1 || 1) {
         // Pd started the GUI, so connect to it on port provided in our args
         pdgui.post("Pd has started the GUI");
         pdgui.connect_as_client();
