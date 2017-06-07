@@ -1,5 +1,9 @@
 "use strict";
 
+function log(data)
+{
+    process.stdout.write(JSON.stringify(data) + "\n");
+}
 var pwd;
 var lib_dir;
 var help_path, browser_doc, browser_path, browser_init;
@@ -1864,18 +1868,25 @@ function init_socket_events () {
         next_command: ""
     };
     connection.on("data", function(data) {
+        log(data);
         perfect_parser(data, command_buffer);
     });
     connection.on("error", function(e) {
         console.log("Socket error: " + e.code);
-        nw_app_quit();
+        //nw_app_quit();
     });
 
     // Add a "close" event handler for the socket
     connection.on("close", function() {
+        PORT++;
+        if(PORT > 5410)
+            PORT = 5400;
+        setTimeout(function(){
+            connect_as_client();
+        }, 100);
         //console.log("Connection closed");
         //connection.destroy();
-        nw_app_quit(); // set a timeout here if you need to debug
+        //nw_app_quit(); // set a timeout here if you need to debug
     });
 }
 
