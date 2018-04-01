@@ -11,7 +11,7 @@ cleanup() {
 trap 'cleanup $LINENO $?' ERR
 CORES=4
 set -x
-MAKE="make -j${CORES}"
+MAKE="make "
 
 if [ $# -eq 0 ] # should check for no arguments
 then
