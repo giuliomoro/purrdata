@@ -3844,7 +3844,6 @@ void canvas_mousewheel(t_canvas *x, t_floatarg xpos, t_floatarg ypos,
         SETFLOAT(at+2, zpos);
         pd_list(mousewheelsym->s_thing, &s_list, 3, at);
     }
->>>>>>> master
 }
 
 int canvas_isconnected (t_canvas *x, t_text *ob1, int n1,
@@ -5236,14 +5235,9 @@ extern void graph_checkgop_rect(t_gobj *z, t_glist *glist,
 void canvas_motion(t_canvas *x, t_floatarg xpos, t_floatarg ypos,
     t_floatarg fmod, t_symbol *s)
 {
-<<<<<<< HEAD
-    //fprintf(stderr,"motion %d %d %d %s\n",
-    //    (int)xpos, (int)ypos, (int)fmod, s->s_name);
-=======
     static t_symbol *mousemotionsym;
     //fprintf(stderr,"motion %d %d %d %d\n",
     //    (int)xpos, (int)ypos, (int)fmod, canvas_last_glist_mod);
->>>>>>> master
     //fprintf(stderr,"canvas_motion=%d\n",x->gl_editor->e_onmotion);
     int mod = fmod;
     if (!x->gl_editor)

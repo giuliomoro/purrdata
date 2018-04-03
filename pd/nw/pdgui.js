@@ -2155,7 +2155,7 @@ function getMoId()
 }
 function mouseovercallback(obj)
 {
-    moId = obj.dataset.pdtag;
+    moId = obj.pdtag;
 }
 function mouseoutcallback(obj)
 {
@@ -2171,6 +2171,8 @@ function gui_gobj_draw_io(cid, parenttag, tag, x1, y1, x2, y2, basex, basey,
     var pdtag = tag;
     gui(cid).get_gobj(parenttag)
     .append(function(frag) {
+	log("Hola");
+	log(JSON.stringify(frag));
         var xlet_class, xlet_id, rect;
         if (is_iemgui) {
             xlet_class = "xlet_iemgui";
@@ -2203,7 +2205,7 @@ function gui_gobj_draw_io(cid, parenttag, tag, x1, y1, x2, y2, basex, basey,
 		// we are interested in the one that comes here, so we replace it here
 		// NOTE: GUI objects without inlets/outlets will not get their 
 		// ID assigned
-		frag.dataset.pdtag = pdtag;
+		frag.pdtag = pdtag;
         return frag;
     });
 }
