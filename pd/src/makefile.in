@@ -21,9 +21,9 @@ datarootdir = @datarootdir@
 
 GFLAGS = -DINSTALL_PREFIX=\"$(prefix)\"
 
-# varibles to match packages/Makefile.buildlayout so that they can be easily
+# variables to match packages/Makefile.buildlayout so that they can be easily
 # overridden when building Pd-extended builds. <hans@at.or.at>
-libpddir = $(libdir)/pd-l2ork
+libpddir = $(libdir)
 pddocdir = $(libpddir)/doc
 libpdbindir = $(libpddir)/bin
 
@@ -188,8 +188,8 @@ install: all
 	install $(BINARYMODE) $(PDEXEC) $(DESTDIR)$(bindir)/@PDEXEC@
 # kludge to allow pd~ to work by default in pd-l2ork
 	rm -f $(DESTDIR)$(libpddir)/pd
-	ln -sf $(bindir)/pd-l2ork $(DESTDIR)$(libpddir)/pd-l2ork
-	ln -sf $(bindir)/pd-l2ork $(DESTDIR)$(libpdbindir)/pd-l2ork
+	@#ln -sf $(bindir)/pd-l2ork $(DESTDIR)$(libpddir)/pd-l2ork
+	@#ln -sf $(bindir)/pd-l2ork $(DESTDIR)$(libpdbindir)/pd-l2ork
 	install -m755 $(BIN_DIR)/pdsend $(DESTDIR)$(bindir)/pdsend
 	install -m755 $(BIN_DIR)/pdreceive $(DESTDIR)$(bindir)/pdreceive 
 	rsync -ax --exclude=.git --exclude=.svn ../doc/* $(DESTDIR)$(pddocdir)

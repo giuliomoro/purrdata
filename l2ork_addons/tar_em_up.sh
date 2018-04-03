@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -euo pipefail
 # super-simplistic installer for l2ork things by Ivica Ico Bukvic <ico@vt.edu>
 # for info on L2Ork visit http://l2ork.music.vt.edu
 
@@ -9,6 +9,9 @@ cleanup() {
 }
 
 trap 'cleanup $LINENO $?' ERR
+CORES=4
+set -x
+MAKE="make "
 
 if [ $# -eq 0 ] # should check for no arguments
 then
@@ -22,6 +25,8 @@ then
 	echo "     -F    full tarball installer (complete recompile)"
 	echo "     -k    keep previous build products"
 	echo "     -l    do a light build (only essential externals)"
+	echo "     -C    clean folder and temp files before building"
+	echo "     -e    everything"
 	echo "     -n    skip package creation (-bB, -fF)"
 	echo "     -r    build a Raspberry Pi deb (incremental)"
 	echo "     -R    build a Raspberry Pi deb (complete recompile)"
@@ -50,6 +55,7 @@ then
 fi
 
 deb=0
+clean=0
 core=0
 full=0
 rpi=0
@@ -60,7 +66,7 @@ any=0
 clean=1
 light=0
 
-while getopts ":bBcfFklnRrTtXzZ" Option
+while getopts ":bBcCefFklnRrTtXzZ" Option
 do case $Option in
 		b)		deb=1
 				inst_dir=${inst_dir:-/usr};;
@@ -70,6 +76,11 @@ do case $Option in
 
 		c)		core=1;;
 
+		C)		clean=1;;
+
+		e)		addon=1
+				core=1
+				full=1;;
 		f)		full=1;;
 
 		F)		full=2;;
@@ -104,6 +115,15 @@ do case $Option in
 		*)		echo "Error: unknown option";;
 	esac
 done
+
+if [ $clean -eq 1 ]
+then
+	rm -rf \
+		../pd/src/s_stuff.h \
+		../pd/src/config.h \
+		../pd/src/makefile
+	git -C .. clean -f
+fi
 
 inst_dir=${inst_dir:-/usr/local}
 
@@ -200,9 +220,12 @@ if [ ! -d "../pd/nw/nw" ]; then
 	nwjs_url=${nwjs_url}/$nwjs_filename
 	echo "Fetching the nwjs binary from"
 	echo "$nwjs_url"
-        wget -nv $nwjs_url
+	# delete any existing file with the same name
+	rm -rf $nwjs_filename
+	wget -nv $nwjs_url
 	if [[ $os == "win" || $os == "osx" ]]; then
-		unzip $nwjs_filename
+		# unzip overwriting existing files
+		unzip -o $nwjs_filename
 	else
 		tar -xf $nwjs_filename
 	fi
@@ -211,7 +234,7 @@ if [ ! -d "../pd/nw/nw" ]; then
 	if [ `uname -m` == "armv7l" ]; then
 		nwjs_dirname=`echo $nwjs_dirname | sed 's/armv7l/arm/'`
 	fi
-        mv $nwjs_dirname ../pd/nw/nw
+	mv $nwjs_dirname ../pd/nw/nw
 	# make sure the nw binary is executable on GNU/Linux
 	if [[ $os != "win" && $dmg == 0 ]]; then
 		chmod 755 ../pd/nw/nw/nw
@@ -238,7 +261,7 @@ then
 	cd pd/src/
 	# make sure that Pd is configured before trying to package it
 	test -f config.h || (aclocal && autoconf && make -C ../../packages pd)
-	make clean
+	$MAKE clean
 	cd ../../
 	tar -jcf ./Pd-l2ork-`date +%Y%m%d`.tar.bz2 pd
 fi
@@ -282,7 +305,7 @@ then
 		cd Gem/
 		export INCREMENTAL="yes"
 	fi
-	cd ../pd/src && aclocal && autoconf
+	cd ../pd/src && aclocal && autoconf || false
 	if [[ $os == "win" ]]; then
 		cd ../../packages/win32_inno
 	elif [[ $os == "osx" ]]; then
@@ -306,7 +329,7 @@ then
 		cp ../../pd/src/g_all_guis.h ../../externals/build/include
 		rm -rf build/
 	fi
-	if [ $rpi -eq 0 ]
+ 	if [ $rpi -eq 0 ] 
 	then
 		echo "installing desktop version..."
 		test -f debian/control.desktop && cp -f debian/control.desktop debian/control
@@ -320,15 +343,16 @@ then
 	if [[ $os == "win" ]]; then
 		echo "Making Windows package..."
 		echo `pwd`
-		make install INCREMENTAL=$INCREMENTAL LIGHT=$LIGHT && make package
+		$MAKE install INCREMENTAL=$INCREMENTAL LIGHT=$LIGHT && make package
 	elif [[ $os == "osx" ]]; then
 		echo "Making OSX package (dmg)..."
 		echo `pwd`
-		make install && make package
+		$MAKE install
+		$MAKE package
 	else
 		# create images folder
 		mkdir -p ../../packages/linux_make/build$inst_dir/lib/pd-l2ork/extra/images
-		make install prefix=$inst_dir
+		$MAKE install prefix=$inst_dir
 	fi
 	echo "copying pd-l2ork-specific externals..."
 	# patch_name
@@ -372,9 +396,9 @@ then
 			cd build/
 			rm -rf DEBIAN/ etc/
 			cd ../
-			make deb prefix=$inst_dir
+			$MAKE deb prefix=$inst_dir
 		else
-			make tarbz2 prefix=$inst_dir
+			$MAKE tarbz2 prefix=$inst_dir
 		fi
 		echo "move full installer..."
 		if [ $deb -gt 0 ]
@@ -386,7 +410,7 @@ then
 			mv -f build/pd*bz2 ../..
 		fi
 		elif [ $deb -gt 0 ]; then
-			make debstage prefix=$inst_dir
+			$MAKE debstage prefix=$inst_dir
 			echo "Debian packaging skipped, build results can be found in packages/linux_make/build/."
 		fi
 		cd ../../

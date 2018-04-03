@@ -166,14 +166,14 @@ darwin_app_core: darwin_app_wrapper
 		pd_install 
 	install -d "$(PD_APP_CONTENTS)/Resources/bin"
 	cd "$(PD_APP_CONTENTS)/Resources" && \
-		ln -s bin Scripts
+		ln -sf bin Scripts
 # support for Info Panel Plugins mgmt
-	cd "$(PD_APP_CONTENTS)" && ln -s Resources/app.nw/extra Plugins
+	cd "$(PD_APP_CONTENTS)" && ln -sf Resources/app.nw/extra Plugins
 	install -p -m0644 org.puredata.pd-l2ork.$(default).plist "$(PD_APP_CONTENTS)/Resources/org.puredata.pd-l2ork.default.plist"
 # since Pd-vanilla on Mac OS X doesn't have an 'include/pd' folder,
 # Pd-extended will mimic Pd-vanilla's include/pd until Pd-vanilla gets one
-	ln -s pd-l2ork "$(PD_APP_CONTENTS)/Resources/app.nw/include/pd"
-	ln -s pd/m_pd.h "$(PD_APP_CONTENTS)/Resources/app.nw/include/m_pd.h"
+	ln -sf pd-l2ork "$(PD_APP_CONTENTS)/Resources/app.nw/include/pd"
+	ln -sf pd/m_pd.h "$(PD_APP_CONTENTS)/Resources/app.nw/include/m_pd.h"
 
 
 #==============================================================================#
@@ -198,7 +198,7 @@ dmg:
 # date in the middle of the build!!!
 	install -p $(BUILD_BASE)/*.app/Contents/Resources/app.nw/$(manualsdir)/Pd/ReadMe.html "/Volumes/$(VOLUME_NAME)"
 # add link to /Applications for easy install
-	ln -s /Applications /Volumes/$(VOLUME_NAME)/Applications
+	ln -sf /Applications /Volumes/$(VOLUME_NAME)/Applications
 # Install to .background for easier manual DS_Store makeing 
 	install -d "/Volumes/$(VOLUME_NAME)/.background"
 # The full path to the background image needs to be added to .DS_Store to work
@@ -314,3 +314,4 @@ test_locations:
 	gcc --version
 	@echo --------------------------------------------------
 	xcodebuild -version || pbxbuild -version
+.PHONY: pd_install pd git_version darwin_app_wrapper darwin_app_core darwin_app current
