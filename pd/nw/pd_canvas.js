@@ -117,7 +117,7 @@ function nw_window_focus_callback(name) {
 
 function nw_window_blur_callback(name) {
     // Fake a mouseup event to keep from getting a dangling selection box
-    if (canvas_events.get_state === "normal") {
+    if (canvas_events.get_state() === "normal") {
         pdgui.pdsend(name, "mouseup_fake");
     }
 }
@@ -161,6 +161,8 @@ var canvas_events = (function() {
         last_draggable_y,       // last y
         previous_state = "none", /* last state, excluding explicit 'none' */
         match_words_state = false,
+        last_dropdown_menu_x,
+        last_dropdown_menu_y,
         last_search_term = "",
         svg_view = document.getElementById("patchsvg").viewBox.baseVal,
         textbox = function () {
@@ -209,21 +211,44 @@ var canvas_events = (function() {
             svg.setAttribute("height", h);
         },
         dropdown_index_to_pd = function(elem) {
-            pdgui.pdsend(elem.getAttribute("data-callback"),
-                elem.querySelector(".highlighted").getAttribute("data-index"));
+            var highlighted = elem.querySelector(".highlighted");
+            if (highlighted) {
+                pdgui.pdsend(elem.getAttribute("data-callback"),
+                    highlighted.getAttribute("data-index"));
+            }
         },
-        dropdown_highlight_elem = function(elem) {
+        dropdown_clear_highlight = function() {
             var container = document.querySelector("#dropdown_list"),
-                li_array;
-            if (!elem.classList.contains("highlighted")) {
                 li_array = container.querySelectorAll("li");
-                Array.prototype.forEach.call(li_array, function(e) {
-                    e.classList.remove("highlighted");
-                });
+            Array.prototype.forEach.call(li_array, function(e) {
+                e.classList.remove("highlighted");
+            });
+        },
+        dropdown_highlight_elem = function(elem, scroll) {
+            var container = document.querySelector("#dropdown_list");
+            if (!elem.classList.contains("highlighted")) {
+                dropdown_clear_highlight();
                 elem.classList.add("highlighted");
                 // Make sure the highlighted element is in view
-                container.scrollTop = elem.offsetTop + elem.offsetHeight
-                    - container.clientHeight;
+                if (scroll) {
+                    if (elem.offsetTop < container.scrollTop
+                        || elem.offsetTop + elem.offsetHeight >
+                            container.scrollTop + container.offsetHeight) {
+                            if (scroll === "up") {
+                                // we can't usse elem.scrollIntoView() here
+                                // because it may also change the scrollbar on
+                                // the document, which in turn could change the
+                                // pageX/pageY, for the mousemove event, which
+                                // in turn would make it impossible for us to
+                                // filter out unnecessary mousemove calls
+                                //    elem.scrollIntoView();
+                            container.scrollTop = elem.offsetTop;
+                        } else if (scroll === "down") {
+                            container.scrollTop = elem.offsetTop + elem.offsetHeight
+                                - container.clientHeight;
+                        }
+                    }
+                }
             }
         },
         events = {
@@ -433,7 +458,8 @@ var canvas_events = (function() {
                     ty = minv.b * dx + minv.d * dy;
                 var obj = scalar_draggables[draggable_elem.id];
                 pdgui.pdsend(obj.cid, "scalar_event", obj.scalar_sym,
-                    obj.drawcommand_sym, obj.event_name, dx, dy, tx, ty);
+                    obj.drawcommand_sym, obj.array_sym, obj.index,
+                    obj.event_name, dx, dy, tx, ty);
                 last_draggable_x = new_x;
                 last_draggable_y = new_y;
             },
@@ -502,13 +528,13 @@ var canvas_events = (function() {
             iemgui_label_mouseup: function(evt) {
                 //pdgui.post("lifting the mousebutton on an iemgui label");
                 // Set last state (none doesn't count as a state)
-                //pdgui.post("previous state is " + canvas_events.get_previous_state());
+                //pdgui.post("previous state is "
+                //    + canvas_events.get_previous_state());
                 canvas_events[canvas_events.get_previous_state()]();
             },
             dropdown_menu_keydown: function(evt) {
                 var select_elem = document.querySelector("#dropdown_list"),
                     li;
-                pdgui.post("keycode is " + evt.keyCode);
                 switch(evt.keyCode) {
                     case 13:
                     case 32:
@@ -518,34 +544,43 @@ var canvas_events = (function() {
                         break;
                     case 27: // escape
                         select_elem.style.setProperty("display", "none");
-                        pdgui.post("canceled thing");
                         canvas_events.normal();
                         break;
                     case 38: // up
                         li = select_elem.querySelector(".highlighted");
                         li = li.previousElementSibling ||
                              li.parentElement.lastElementChild;
-                        dropdown_highlight_elem(li);
+                        dropdown_highlight_elem(li, "up");
+                        evt.preventDefault();
                         break;
                     case 40: // down
                         li = select_elem.querySelector(".highlighted");
                         li = li.nextElementSibling ||
                              li.parentElement.firstElementChild;
-                        dropdown_highlight_elem(li);
+                        dropdown_highlight_elem(li, "down");
+                        evt.preventDefault();
+                        break;
                     default:
                 }
-
             },
             dropdown_menu_keypress: function(evt) {
                 var li_nodes = document.querySelectorAll("#dropdown_list li"),
                     string_array = [],
+                    highlighted,
                     highlighted_index,
                     match,
                     offset;
-                highlighted_index =
-                    +document.querySelector("#dropdown_list .highlighted")
-                        .getAttribute("data-index");
-                offset = highlighted_index + 1;
+                highlighted = document
+                    .querySelector("#dropdown_list .highlighted");
+                if (highlighted) {
+                    highlighted_index =
+                        +document.querySelector("#dropdown_list .highlighted")
+                            .getAttribute("data-index");
+                    offset = highlighted_index + 1;
+                } else {
+                    highlighted_index = 1;
+                    offset = 2;
+                }
                 Array.prototype.forEach.call(li_nodes, function(e, i, a) {
                     var s = a[(i + offset) % a.length];
                     string_array.push(s.textContent.trim());
@@ -558,23 +593,49 @@ var canvas_events = (function() {
                 if (match !== undefined) {
                     match = (match + offset) % li_nodes.length;
                     if (match !== highlighted_index) {
-                        dropdown_highlight_elem(li_nodes[match]);
+                        dropdown_highlight_elem(li_nodes[match],
+                            match < highlighted_index ? "up" : "down");
                     }
                 }
             },
             dropdown_menu_mousedown: function(evt) {
-                var select_elem = document.querySelector("#dropdown_list");
+                var select_elem = document.querySelector("#dropdown_list"),
+                    in_dropdown = evt.target;
+                while (in_dropdown) {
+                    if (in_dropdown.id === "dropdown_list") {
+                        break;
+                    }
+                    in_dropdown = in_dropdown.parentNode;
+                }
+                // Allow scrollbar click and drag without closing the menu
+                if (in_dropdown &&
+                        evt.pageX - select_elem.offsetLeft >
+                        select_elem.clientWidth) {
+                    return;
+                }
+                // Special case for OSX, where the scrollbar doesn't take
+                // up any extra space
+                if (nw.process.platform === "darwin"
+                    && (evt.target.id === "dropdown_list")) {
+                    return;
+                }
                 if (evt.target.parentNode
                     && evt.target.parentNode.parentNode
                     && evt.target.parentNode.parentNode.id === "dropdown_list") {
                     dropdown_highlight_elem(evt.target);
                 }
+                // This selects whatever item is highlighted even
+                // if we click outside the menu. Might be better to
+                // cancel in that case.
                 dropdown_index_to_pd(select_elem);
                 select_elem.style.setProperty("display", "none");
                 canvas_events.normal();
             },
             dropdown_menu_mouseup: function(evt) {
                 var i, select_elem;
+                // This can be triggered if the user keeps the mouse down
+                // to highlight an element and releases the mouse button to
+                // choose that element
                 if (evt.target.parentNode
                     && evt.target.parentNode.parentNode
                     && evt.target.parentNode.parentNode.id === "dropdown_list") {
@@ -584,14 +645,33 @@ var canvas_events = (function() {
                     canvas_events.normal();
                 }
             },
-            dropdown_menu_mouseover: function(evt) {
-                var li_array;
-                if (evt.target.parentNode
-                    && evt.target.parentNode.parentNode
-                    && evt.target.parentNode.parentNode.id === "dropdown_list") {
-                    dropdown_highlight_elem(evt.target);
+            dropdown_menu_wheel: function(evt) {
+                // Here we generate bogus mouse coords so that
+                // we can break through the filter below if we're
+                // using the mouse wheel to scroll in the list.
+                last_dropdown_menu_x = Number.MIN_VALUE;
+                last_dropdown_menu_y = Number.MIN_VALUE;
+            },
+            dropdown_menu_mousemove: function(evt) {
+                // For whatever reason, Chromium decides to trigger the
+                // mousemove/mouseenter/mouseover events if the element
+                // underneath it changes (or for mousemove, if the element
+                // moves at all). Unfortunately that means we have to track
+                // the mouse position the entire time to filter out the
+                // true mousemove events from the ones Chromium generates
+                // when a scroll event changes the element under the mouse.
+                if (evt.pageX !== last_dropdown_menu_x
+                    || evt.pageY !== last_dropdown_menu_y) {
+                    if (evt.target.parentNode
+                        && evt.target.parentNode.parentNode
+                        && evt.target.parentNode.parentNode.id === "dropdown_list") {
+                        dropdown_highlight_elem(evt.target);
+                    } else {
+                        dropdown_clear_highlight();
+                    }
                 }
-                // hide the dropdown menu <div> thingy
+                last_dropdown_menu_x = evt.pageX;
+                last_dropdown_menu_y = evt.pageY;
             }
         },
         utils = {
@@ -680,13 +760,24 @@ var canvas_events = (function() {
 
     // MouseWheel event for zooming
     document.addEventListener("wheel", function(evt) {
-        if (pdgui.cmd_or_ctrl_key(evt)) {
-            if (evt.deltaY < 0) {
-                nw_window_zoom(name, +1);
-            } else if (evt.deltaY > 0) {
-                nw_window_zoom(name, -1);
+        var d = { deltaX: 0, deltaY: 0, deltaZ: 0 };
+        Object.keys(d).forEach(function(key) {
+            if (evt[key] < 0) {
+                d[key] = -1;
+            } else if (evt[key] > 0) {
+                d[key] = 1;
+            } else {
+                d[key] = 0;
             }
+        });
+        if (pdgui.cmd_or_ctrl_key(evt)) {
+            // scroll up for zoom-in, down for zoom-out
+            nw_window_zoom(name, -d.deltaY);
         }
+        // Send a message on to Pd for the [mousewheel] legacy object
+        // (in the future we can refcount if we want to prevent forwarding
+        // these messages when there's no extant receiver)
+        pdgui.pdsend(name, "legacy_mousewheel", d.deltaX, d.deltaY, d.deltaZ);
     });
 
     // The following is commented out because we have to set the
@@ -848,9 +939,11 @@ var canvas_events = (function() {
             this.none();
             document.addEventListener("mousedown", events.dropdown_menu_mousedown, false);
             document.addEventListener("mouseup", events.dropdown_menu_mouseup, false);
-            document.addEventListener("mouseover", events.dropdown_menu_mouseover, false);
+            document.addEventListener("mousemove", events.dropdown_menu_mousemove, false);
             document.addEventListener("keydown", events.dropdown_menu_keydown, false);
             document.addEventListener("keypress", events.dropdown_menu_keypress, false);
+            document.querySelector("#dropdown_list")
+                .addEventListener("wheel", events.dropdown_menu_wheel, false);
         },
         search: function() {
             this.none();
@@ -879,12 +972,14 @@ var canvas_events = (function() {
             last_search_term = "";
         },
         add_scalar_draggable: function(cid, tag, scalar_sym, drawcommand_sym,
-            event_name) {
+            event_name, array_sym, index) {
             scalar_draggables[tag] = {
                 cid: cid,
                 scalar_sym: scalar_sym,
                 drawcommand_sym: drawcommand_sym,
-                event_name: event_name
+                event_name: event_name,
+                array_sym: array_sym,
+                index: index
             };
         },
         remove_scalar_draggable: function(id) {
@@ -946,9 +1041,11 @@ function register_window_id(cid, attr_array) {
     // For now, there is no way for the cord inspector to be turned on by
     // default. But if this changes we need to set its menu item checkbox
     // accordingly here
-    //set_cord_inspector_checkbox();
+    // set_cord_inspector_checkbox();
 
-    // One final kludge-- because window creation is asyncronous, we may
+    // Set scroll bars
+    pdgui.canvas_set_scrollbars(cid, !attr_array.hide_scroll);
+    // One final kludge-- because window creation is asynchronous, we may
     // have gotten a dirty flag before the window was created. In that case
     // we check the title_queue to see if our title now contains an asterisk
     // (which is the visual cue for "dirty")

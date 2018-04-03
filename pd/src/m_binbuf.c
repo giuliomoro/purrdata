@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include "m_pd.h"
 #include "s_stuff.h"
+#include "g_canvas.h"
 #include <stdio.h>
 
 #ifdef HAVE_UNISTD_H
@@ -20,6 +21,8 @@
 #include <fcntl.h>
 #include <string.h>
 #include <stdarg.h>
+
+#define DOLLARALL -0x7fffffff /* sentinel value for "$@" dollar arg */
 
 /* escape characters for saving */
 static char* strnescape(char *dest, const char *src, size_t outlen)
@@ -201,7 +204,7 @@ void binbuf_text(t_binbuf *x, char *text, size_t size)
                     if(buf[2]==0) /* only expand A_DOLLAR $@ */
                     {
                         ap->a_type = A_DOLLAR;
-                        ap->a_w.w_symbol = gensym("@");
+                        ap->a_w.w_index = DOLLARALL;
                     } 
                     else /* there is no A_DOLLSYM $@ */
                     {
@@ -391,7 +394,7 @@ void binbuf_addbinbuf(t_binbuf *x, t_binbuf *y)
             break;
         case A_DOLLAR:
             //fprintf(stderr,"addbinbuf: dollar\n");
-            if(ap->a_w.w_symbol==gensym("@")){ /* JMZ: $@ expansion */
+            if(ap->a_w.w_index==DOLLARALL){ /* JMZ: $@ expansion */
                 SETSYMBOL(ap, gensym("$@"));
             } else {
                 sprintf(tbuf, "$%d", ap->a_w.w_index);
@@ -455,7 +458,7 @@ void binbuf_restore(t_binbuf *x, int argc, t_atom *argv)
             else if (!strcmp(str, "$@")) /* JMZ: $@ expansion */
             {
                 ap->a_type = A_DOLLAR;
-                ap->a_w.w_symbol = gensym("@");
+                ap->a_w.w_index = DOLLARALL;
             }
             else if ((str2 = strchr(str, '$')) && str2[1] >= '0'
                 && str2[1] <= '9')
@@ -684,16 +687,15 @@ void binbuf_eval(t_binbuf *x, t_pd *target, int argc, t_atom *argv)
     t_atom *at = x->b_vec;
     int ac = x->b_n;
     int nargs, maxnargs = 0;
-    int at_arg = 0;
 
     //first we need to check if the list of arguments has $@
     //fprintf(stderr,"=========\nbinbuf_eval argc:%d ac:%d\n", argc, (int)ac);
-    int count;
-    for (count = 0; count < ac; count++)
+    int count, old_ac = ac;
+    for (count = 0; count < old_ac; count++)
     {
         //fprintf(stderr, "count %d\n", count);
         if (at[count].a_type == A_DOLLAR &&
-            at[count].a_w.w_symbol==gensym("@"))
+            at[count].a_w.w_index==DOLLARALL)
         {
             //fprintf(stderr,"found @ count:%d ac:%d argc:%d ac+argc-1:%d\n",
             //    count, ac, argc, ac+argc-1);
@@ -764,6 +766,7 @@ void binbuf_eval(t_binbuf *x, t_pd *target, int argc, t_atom *argv)
             if (!ac) break;
             if (at->a_type == A_DOLLAR)
             {
+                /* would it make sense to consider $@ here? */
                 if (at->a_w.w_index <= 0 || at->a_w.w_index > argc)
                 {
                     error("$%d: not enough arguments supplied",
@@ -838,7 +841,7 @@ void binbuf_eval(t_binbuf *x, t_pd *target, int argc, t_atom *argv)
                 *msp = *at;
                 break;
             case A_DOLLAR:
-                if (at->a_w.w_symbol==gensym("@")) 
+                if (at->a_w.w_index==DOLLARALL)
                 { /* JMZ: $@ expansion */
                     int i;
                     //if(msp+argc >= ems) 
@@ -1621,10 +1624,16 @@ int binbuf_match(t_binbuf *inbuf, t_binbuf *searchbuf, int wholeword)
                 if (a2->a_type != a1->a_type)
                     goto nomatch;
             }
-            else if (a1->a_type == A_FLOAT || a1->a_type == A_DOLLAR)
+            else if (a1->a_type == A_FLOAT)
+            {
+                if (a2->a_type != a1->a_type ||
+                    a1->a_w.w_float != a2->a_w.w_float)
+                        goto nomatch;
+            }
+            else if (a1->a_type == A_DOLLAR)
             {
                 if (a2->a_type != a1->a_type || 
-                    a1->a_w.w_float != a2->a_w.w_float)
+                    a1->a_w.w_index != a2->a_w.w_index)
                         goto nomatch;
             }
             else if (a1->a_type == A_SYMBOL || a1->a_type == A_DOLLSYM)
@@ -1671,6 +1680,7 @@ void binbuf_evalfile(t_symbol *name, t_symbol *dir)
             b = newb;
         }
         binbuf_eval(b, 0, 0, 0);
+        canvas_initbang((t_canvas *)(s__X.s_thing)); /* JMZ*/
         gensym("#A")->s_thing = bounda;
         s__N.s_thing = boundn;
     }

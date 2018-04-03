@@ -11,10 +11,10 @@ extern "C" {
 #include <stdarg.h>
 
 #define PD_MAJOR_VERSION 0
-#define PD_MINOR_VERSION 47
+#define PD_MINOR_VERSION 48
 #define PD_BUGFIX_VERSION 0
 #define PD_TEST_VERSION ""
-#define PD_L2ORK_VERSION "2.3.0"
+#define PD_L2ORK_VERSION "2.5.0"
 #define PDL2ORK
 extern int pd_compatibilitylevel;   /* e.g., 43 for pd 0.43 compatibility */
 
@@ -356,6 +356,7 @@ EXTERN void binbuf_restore(t_binbuf *x, int argc, t_atom *argv);
 EXTERN void binbuf_print(t_binbuf *x);
 EXTERN int binbuf_getnatom(t_binbuf *x);
 EXTERN t_atom *binbuf_getvec(t_binbuf *x);
+EXTERN int binbuf_resize(t_binbuf *x, int newsize);
 EXTERN void binbuf_eval(t_binbuf *x, t_pd *target, int argc, t_atom *argv);
 EXTERN int binbuf_read(t_binbuf *b, char *filename, char *dirname,
     int crflag);
@@ -673,7 +674,8 @@ EXTERN t_float garray_get(t_garray *x, t_symbol *s, t_int indx);
 EXTERN void garray_redraw(t_garray *x);
 EXTERN int garray_npoints(t_garray *x);
 EXTERN char *garray_vec(t_garray *x);
-EXTERN void garray_resize(t_garray *x, t_floatarg f);
+EXTERN void garray_resize(t_garray *x, t_floatarg f);  /* avoid; use this: */
+EXTERN void garray_resize_long(t_garray *x, long n);   /* better version */
 EXTERN void garray_usedindsp(t_garray *x);
 EXTERN void garray_setsaveit(t_garray *x, int saveit);
 EXTERN t_glist *garray_getglist(t_garray *x);

@@ -220,6 +220,13 @@ int gobj_shouldvis(t_gobj *x, struct _glist *glist)
     //fprintf(stderr,"shouldvis %d %d %d %d\n",
     //    glist->gl_havewindow, glist->gl_isgraph,
     //    glist->gl_goprect, glist->gl_owner != NULL);
+        /* if our parent is a graph, and if that graph itself isn't
+        visible, then we aren't either. */
+    if (!glist->gl_havewindow && glist->gl_isgraph && glist->gl_owner
+        && !gobj_shouldvis(&glist->gl_gobj, glist->gl_owner))
+            return (0);
+        /* if we're graphing-on-parent and the object falls outside the
+        graph rectangle, don't draw it. */
     if (!glist->gl_havewindow && glist->gl_isgraph && glist->gl_goprect &&
         glist->gl_owner && (pd_class(&x->g_pd) != scalar_class) &&
         (pd_class(&x->g_pd) != garray_class))
@@ -315,7 +322,7 @@ int canvas_restore_original_position(t_glist *x, t_gobj *y, const char* objtag,
     if (pd_class(&y->g_pd) != canvas_class || ((t_glist *)y)->gl_owner == x)
     {
         t_object *ob = NULL;
-        t_rtext *yrnxt = NULL, *yr = NULL;
+        t_rtext *yrnxt = NULL;
 
         if (y->g_next)
         {
@@ -332,10 +339,6 @@ int canvas_restore_original_position(t_glist *x, t_gobj *y, const char* objtag,
         else
         {
             ret = 1;
-        }
-        if (ob)
-        {
-            yr = glist_findrtext(x, (t_text *)&ob->ob_g);
         }
         if (ret != 1)
         {
@@ -448,13 +451,9 @@ void glist_deselectline(t_glist *x)
         do {
             oc = linetraverser_next(&t);
         } while (oc && oc != x->gl_editor->e_selectline_tag);
-        int issignal;
-        if(outlet_getsymbol(t.tr_outlet) == &s_signal)
-            issignal = 1;
-        else
-            issignal = 0;
         canvas_draw_gop_resize_hooks(x);
-        sprintf(tagbuf, "l%lx", (long unsigned int)x->gl_editor->e_selectline_tag);
+        sprintf(tagbuf, "l%lx",
+            (long unsigned int)x->gl_editor->e_selectline_tag);
         gui_vmess("gui_canvas_deselect_line", "xs", x, tagbuf);
     }    
 }
@@ -1329,6 +1328,14 @@ static void glist_doreload(t_glist *gl, t_symbol *name, t_symbol *dir,
                 do g = g->g_next in this case. */
             //int j = glist_getindex(gl, g);
             //fprintf(stderr, "rebuildlicious %d\n", j);
+
+            // Bugfix for cases where canvas_vis doesn't actually create a
+            // new editor. We need to fix canvas_vis so that the bug doesn't
+            // get triggered. But since we know this fixes a regression we'll
+            // keep this as a point in the history as we fix canvas_vis. Once
+            // that's done we can remove this call.
+            canvas_create_editor(gl);
+
             if (!gl->gl_havewindow)
             {
                 canvas_vis(glist_getcanvas(gl), 1);
@@ -1380,7 +1387,7 @@ static void glist_doreload(t_glist *gl, t_symbol *name, t_symbol *dir,
     them to reload an abstraction; also suppress window list update */
 int glist_amreloadingabstractions = 0;
 
-    /* call canvas_doreload on everyone */
+    /* call glist_doreload on everyone */
 void canvas_reload(t_symbol *name, t_symbol *dir, t_gobj *except)
 {
     t_canvas *x;
@@ -2471,7 +2478,7 @@ void canvas_vis(t_canvas *x, t_floatarg f)
             //fprintf(stderr,"new\n");
             canvas_create_editor(x);
             canvas_args_to_string(argsbuf, x);
-            gui_vmess("gui_canvas_new", "xiisiissis",
+            gui_vmess("gui_canvas_new", "xiisiissiiis",
                 x,
                 (int)(x->gl_screenx2 - x->gl_screenx1),
                 (int)(x->gl_screeny2 - x->gl_screeny1),
@@ -2481,6 +2488,8 @@ void canvas_vis(t_canvas *x, t_floatarg f)
                 x->gl_name->s_name,
                 canvas_getdir(x)->s_name,
                 x->gl_dirty,
+                x->gl_noscroll,
+                x->gl_nomenu,
                 argsbuf);
 
             /* It looks like this font size call is no longer needed,
@@ -2644,7 +2653,8 @@ int garray_properties(t_garray *x, t_symbol **gfxstubp, t_symbol **namep,
 void canvas_properties(t_glist *x)
 {
     t_gobj *y;
-    char graphbuf[200], *gfx_tag;
+    //char graphbuf[200];
+    char *gfx_tag;
 
     gfx_tag = gfxstub_new2(&x->gl_pd, x);
 
@@ -2684,6 +2694,8 @@ void canvas_properties(t_glist *x)
         gui_s("y_pix");    gui_i((int)x->gl_pixheight);
         gui_s("x_margin"); gui_i((int)x->gl_xmargin);
         gui_s("y_margin"); gui_i((int)x->gl_ymargin);
+        gui_s("no_scroll");   gui_i(x->gl_noscroll);
+        gui_s("no_menu");     gui_i(x->gl_nomenu);
     }
     else
     {
@@ -2705,6 +2717,8 @@ void canvas_properties(t_glist *x)
         gui_s("y_pix");    gui_i((int)x->gl_pixheight);
         gui_s("x_margin"); gui_i((int)x->gl_xmargin);
         gui_s("y_margin"); gui_i((int)x->gl_ymargin);
+        gui_s("no_scroll");   gui_i(x->gl_noscroll);
+        gui_s("no_menu");     gui_i(x->gl_nomenu);
     }
     //gfxstub_new(&x->gl_pd, x, graphbuf);
 
@@ -2715,7 +2729,6 @@ void canvas_properties(t_glist *x)
     {
         if (pd_class(&y->g_pd) == garray_class) 
         {
-            t_garray *garray = (t_garray *)y;
             t_symbol *gfxstub, *name, *fill, *outline;
             int size, flags;
             /* garray_properties can fail to find an array, so we won't
@@ -2760,6 +2773,10 @@ static void canvas_donecanvasdialog(t_glist *x,
     ypix = atom_getfloatarg(8, argc, argv);
     xmargin = atom_getfloatarg(9, argc, argv);
     ymargin = atom_getfloatarg(10, argc, argv);
+
+    pd_vmess(&x->gl_pd, gensym("scroll"), "f",
+        atom_getfloatarg(11, argc, argv));
+    x->gl_nomenu = atom_getintarg(12, argc, argv);
 
     /* parent windows are treated differently than applies to
        individual objects */
@@ -2870,7 +2887,7 @@ static void canvas_donecanvasdialog(t_glist *x,
     {
         glist_noselect(x);
         gobj_vis(&x->gl_gobj, x->gl_owner, 0);
-        if (gobj_shouldvis(&x->gl_obj, x->gl_owner))
+        if (gobj_shouldvis(&x->gl_gobj, x->gl_owner))
         {
             gobj_vis(&x->gl_gobj, x->gl_owner, 1);
             //fprintf(stderr,"yes\n");
@@ -3341,7 +3358,7 @@ void canvas_doclick(t_canvas *x, int xpos, int ypos, int which,
             int noutlet;
             int ninlet;
                 /* resize?  only for "true" text boxes, canvases, iemguis,
-                   and -- using an awful hack-- for the scope~ and grid
+                   and -- using an awful hack-- for the Scope~ and grid
                    objects by checking for the class name below.
 
                    One exception-- my_canvas. It has a weirdo interface
@@ -3354,7 +3371,7 @@ void canvas_doclick(t_canvas *x, int xpos, int ypos, int which,
                 */
             if (ob && (ob->te_iemgui
                  && pd_class((t_pd *)ob) != my_canvas_class
-                 || pd_class(&ob->te_pd)->c_name == gensym("scope~")
+                 || pd_class(&ob->te_pd)->c_name == gensym("Scope~")
                  || pd_class(&ob->te_pd)->c_name == gensym("grid"))
                 && xpos >= x2-4 && ypos > y2-6)
             {
@@ -3373,7 +3390,7 @@ void canvas_doclick(t_canvas *x, int xpos, int ypos, int which,
                     }
                     else
                     {
-                        pd_vmess((t_pd *)ob, gensym("_click"),
+                        pd_vmess((t_pd *)ob, gensym("_click_for_resizing"),
                            "fff", (t_float)1, (t_float)xpos, (t_float)ypos);
                     }
                 }
@@ -3790,11 +3807,44 @@ void canvas_doclick(t_canvas *x, int xpos, int ypos, int which,
     }
 }
 
+   // Dispatch mouseclick message to receiver (for legacy mouse event externals)
+void canvas_dispatch_mouseclick(t_float down, t_float xpos, t_float ypos,
+    t_float which)
+{
+    t_symbol *mouseclicksym = gensym("#legacy_mouseclick");
+    if (mouseclicksym->s_thing)
+    {
+        t_atom at[4];
+        SETFLOAT(at, down);
+        SETFLOAT(at+1, which);
+        SETFLOAT(at+2, xpos);
+        SETFLOAT(at+3, ypos);
+        pd_list(mouseclicksym->s_thing, &s_list, 4, at);
+    }
+}
+
 void canvas_mousedown(t_canvas *x, t_floatarg xpos, t_floatarg ypos,
     t_floatarg which, t_floatarg mod)
 {
     //fprintf(stderr,"canvas_mousedown %d\n", x->gl_editor->e_onmotion);
     canvas_doclick(x, xpos, ypos, which, mod, 1, NULL);
+    // now dispatch to any listeners
+    canvas_dispatch_mouseclick(1., xpos, ypos, which);
+}
+
+void canvas_mousewheel(t_canvas *x, t_floatarg xpos, t_floatarg ypos,
+    t_floatarg zpos)
+{
+    t_symbol *mousewheelsym = gensym("#legacy_mousewheel");
+    if (mousewheelsym->s_thing)
+    {
+        t_atom at[3];
+        SETFLOAT(at, xpos);
+        SETFLOAT(at+1, ypos);
+        SETFLOAT(at+2, zpos);
+        pd_list(mousewheelsym->s_thing, &s_list, 3, at);
+    }
+>>>>>>> master
 }
 
 int canvas_isconnected (t_canvas *x, t_text *ob1, int n1,
@@ -4804,6 +4854,8 @@ void canvas_mouseup(t_canvas *x,
     if (canvas_last_glist_mod == -1)
         canvas_doclick(x, xpos, ypos, 0,
             (glob_shift + glob_ctrl*2 + glob_alt*4), 0, NULL);
+    // now dispatch to any click listeners
+    canvas_dispatch_mouseclick(0., xpos, ypos, which);
 }
 
 /* Cheap hack to simulate mouseup at the last x/y coord. We use this in
@@ -5184,8 +5236,14 @@ extern void graph_checkgop_rect(t_gobj *z, t_glist *glist,
 void canvas_motion(t_canvas *x, t_floatarg xpos, t_floatarg ypos,
     t_floatarg fmod, t_symbol *s)
 {
+<<<<<<< HEAD
     //fprintf(stderr,"motion %d %d %d %s\n",
     //    (int)xpos, (int)ypos, (int)fmod, s->s_name);
+=======
+    static t_symbol *mousemotionsym;
+    //fprintf(stderr,"motion %d %d %d %d\n",
+    //    (int)xpos, (int)ypos, (int)fmod, canvas_last_glist_mod);
+>>>>>>> master
     //fprintf(stderr,"canvas_motion=%d\n",x->gl_editor->e_onmotion);
     int mod = fmod;
     if (!x->gl_editor)
@@ -5311,10 +5369,10 @@ void canvas_motion(t_canvas *x, t_floatarg xpos, t_floatarg ypos,
                 pd_vmess(sh, gensym("_motion"), "ff", (t_float)xpos, (t_float)ypos);
                 //pd_vmess(sh, gensym("_click"), "fff", 0, xpos, ypos);
             }
-            else if (ob && (pd_class(&ob->te_pd)->c_name == gensym("scope~")
+            else if (ob && (pd_class(&ob->te_pd)->c_name == gensym("Scope~")
                             || pd_class(&ob->te_pd)->c_name == gensym("grid")))
             {
-                pd_vmess((t_pd *)ob, gensym("_motion"),
+                pd_vmess((t_pd *)ob, gensym("_motion_for_resizing"),
                     "ff", (t_float)xpos, (t_float)ypos);
             }
             else post("not resizable");
@@ -5387,6 +5445,16 @@ void canvas_motion(t_canvas *x, t_floatarg xpos, t_floatarg ypos,
     //        x, (int)xpos, (int)ypos);
     //}
     x->gl_editor->e_lastmoved = 1;
+    // Dispatch to any listeners for the motion message
+    if (!mousemotionsym)
+        mousemotionsym = gensym("#legacy_mousemotion");
+    if (mousemotionsym->s_thing)
+    {
+        t_atom at[2];
+        SETFLOAT(at, xpos);
+        SETFLOAT(at+1, ypos);
+        pd_list(mousemotionsym->s_thing, &s_list, 2, at);
+    }
 }
 
 void canvas_startmotion(t_canvas *x)
@@ -5634,7 +5702,6 @@ void canvas_menuclose(t_canvas *x, t_floatarg fforce)
     /* put up a dialog which may call canvas_font back to do the work */
 static void canvas_menufont(t_canvas *x)
 {
-    char buf[80];
     t_canvas *x2 = canvas_getrootfor(x);
     gfxstub_deleteforkey(x2);
     char *gfxstub = gfxstub_new2(&x2->gl_pd, &x2->gl_pd);
@@ -7508,7 +7575,7 @@ static void canvas_enterobj(t_canvas *x, t_symbol *item, t_floatarg xpos,
     t_floatarg ypos, t_floatarg xletno)
 {
     if (x->gl_editor->e_onmotion == MA_MOVE) { return; }
-    t_symbol *name = 0, *helpname, *dir;
+    //t_symbol *name = 0, *helpname, *dir;
     int yoffset = 0, xoffset = 0;
     if (item == gensym("inlet"))
     {
@@ -7528,19 +7595,19 @@ static void canvas_enterobj(t_canvas *x, t_symbol *item, t_floatarg xpos,
         if (pd_class((t_pd *)g)==canvas_class ?
             canvas_isabstraction((t_canvas *)g) : 0)
         {
-            t_canvas *z = (t_canvas *)g;
-            name = z->gl_name;
-            helpname = z->gl_name;
-            dir = canvas_getdir(z);
+            //t_canvas *z = (t_canvas *)g;
+            //name = z->gl_name;
+            //helpname = z->gl_name;
+            //dir = canvas_getdir(z);
         }
         else
         {
-            name = g->g_pd->c_name;
-            helpname = g->g_pd->c_helpname;
-            dir = g->g_pd->c_externdir;
+            //name = g->g_pd->c_name;
+            //helpname = g->g_pd->c_helpname;
+            //dir = g->g_pd->c_externdir;
         }
-        //sys_vgui("pdtk_gettip .x%lx.c %s %d \
-        //[list %s] [list %s] [list %s]\n",
+        //sys_vgui("pdtk_gettip .x%lx.c %s %d "
+        //"[list %s] [list %s] [list %s]\n",
         //x, item->s_name, (int)xletno,
         //name->s_name, helpname->s_name, dir->s_name);
     }
@@ -7556,7 +7623,7 @@ static void canvas_tip(t_canvas *x, t_symbol *s, int argc, t_atom *argv)
     else
     {
         //sys_vgui("pdtk_tip .x%lx.c 1", x);
-        t_atom *at = argv;
+        //t_atom *at = argv;
         int i;
         for (i=0; i<argc; i++)
         {
@@ -7624,8 +7691,10 @@ void g_editor_setup(void)
         A_FLOAT, A_FLOAT, A_FLOAT, A_NULL);
     class_addmethod(canvas_class, (t_method)canvas_mouseup_fake,
         gensym("mouseup_fake"), A_NULL);
-    class_addmethod(canvas_class, (t_method)canvas_mousedown_middle, gensym("mouse-2"),
-        A_FLOAT, A_FLOAT, A_FLOAT, A_NULL);
+    class_addmethod(canvas_class, (t_method)canvas_mousedown_middle,
+        gensym("mouse-2"), A_FLOAT, A_FLOAT, A_FLOAT, A_NULL);
+    class_addmethod(canvas_class, (t_method)canvas_mousewheel,
+        gensym("legacy_mousewheel"), A_FLOAT, A_FLOAT, A_FLOAT, A_NULL);
     class_addmethod(canvas_class, (t_method)canvas_key, gensym("key"),
         A_GIMME, A_NULL);
     class_addmethod(canvas_class, (t_method)canvas_motion, gensym("motion"),

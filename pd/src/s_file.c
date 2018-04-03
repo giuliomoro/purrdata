@@ -40,13 +40,13 @@
 #define snprintf sprintf_s
 #endif
 
-int sys_defeatrt, sys_zoom;
+int sys_defeatrt, sys_zoom, sys_browser_doc = 1, sys_browser_path, sys_browser_init;
 t_symbol *sys_flags = &s_;
 void sys_doflags( void);
 
 #ifdef UNIX
 
-#define USER_CONFIG_DIR ".pd-l2ork"
+#define USER_CONFIG_DIR ".purr-data"
 
 static char *sys_prefbuf;
 
@@ -268,6 +268,8 @@ static char *sys_prefbuf;
 // prefs is *much* faster now than with the previous method which invoked
 // 'defaults read' on each individual key.
 
+static int save_prefs_later = 0;
+
 static void sys_initloadpreferences(void)
 {
     char cmdbuf[MAXPDSTRING], *buf;
@@ -308,6 +310,8 @@ static void sys_initloadpreferences(void)
       // Read from the package defaults and write to the user prefs.
       prefs = default_prefs;
       strncpy(current_prefs, user_prefs, FILENAME_MAX);
+      // AG: Remember to save the prefs later after we loaded them (see below).
+      save_prefs_later = 1;
     }
     // This looks complicated, but is rather straightforward. The individual
     // stages of the pipe are:
@@ -322,7 +326,7 @@ static void sys_initloadpreferences(void)
     //   "path1" : "\/System\/Library\/Fonts"     path1: /System/Library/Fonts
     // }
     snprintf(cmdbuf, MAXPDSTRING,
-        "plutil -convert json -r -o - %s.plist "
+        "plutil -convert json -r -o - \"%s.plist\" "
         "| sed -E "
           "-e 's/[{}]//g' "
           "-e 's/^ *\"(([^\"]|\\\\.)*)\" *: *\"(([^\"]|\\\\.)*)\".*/\\1: \\3/' "
@@ -405,6 +409,14 @@ static void sys_doneloadpreferences( void)
     if (sys_prefbuf)
         free(sys_prefbuf);
     sys_prefbuf = NULL;
+    if (save_prefs_later) {
+      // AG: We need to save the default prefs to the user prefs at this point
+      // in order to avoid losing them, in case the recent file list is written
+      // without first saving the defaults (fixes #339).
+      extern void glob_savepreferences(t_pd *dummy);
+      glob_savepreferences(NULL);
+      save_prefs_later = 0;
+    }
 }
 
 // AG: We use a similar approach here to import the data into the defaults
@@ -480,6 +492,8 @@ static int check_exists(const char*path)
     return (0 == access(pathbuf, 0));
 }
 #endif
+
+extern void sys_expandpathelems(const char *name, char *result);
 
 void sys_loadpreferences( void)
 {
@@ -655,6 +669,12 @@ void sys_loadpreferences( void)
         sscanf(prefbuf, "%d", &sys_defeatrt);
     if (sys_getpreference("savezoom", prefbuf, MAXPDSTRING))
         sscanf(prefbuf, "%d", &sys_zoom);
+    if (sys_getpreference("browser_doc", prefbuf, MAXPDSTRING))
+        sscanf(prefbuf, "%d", &sys_browser_doc);
+    if (sys_getpreference("browser_path", prefbuf, MAXPDSTRING))
+        sscanf(prefbuf, "%d", &sys_browser_path);
+    if (sys_getpreference("browser_init", prefbuf, MAXPDSTRING))
+        sscanf(prefbuf, "%d", &sys_browser_init);
     if (sys_getpreference("guipreset", prefbuf, MAXPDSTRING))
     {
         char preset_buf[MAXPDSTRING];
@@ -794,6 +814,12 @@ void glob_savepreferences(t_pd *dummy)
     sys_putpreference("defeatrt", buf1);
     sprintf(buf1, "%d", sys_zoom);
     sys_putpreference("savezoom", buf1);
+    sprintf(buf1, "%d", sys_browser_doc);
+    sys_putpreference("browser_doc", buf1);
+    sprintf(buf1, "%d", sys_browser_path);
+    sys_putpreference("browser_path", buf1);
+    sprintf(buf1, "%d", sys_browser_init);
+    sys_putpreference("browser_init", buf1);
     sys_putpreference("guipreset", sys_gui_preset->s_name);
     sys_putpreference("flags", 
         (sys_flags ? sys_flags->s_name : ""));
